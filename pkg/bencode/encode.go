@@ -8,6 +8,10 @@ import (
 	"strconv"
 )
 
+type Marshaler interface {
+	MarshalBencoding() ([]byte, error)
+}
+
 type Encoder struct {
 	io.Writer
 }
@@ -112,6 +116,13 @@ func (e *Encoder) Encode(v any) error {
 		return e.encodeList(v)
 	case map[string]any:
 		return e.encodeDictionary(v)
+	case Marshaler:
+		b, err := v.MarshalBencoding()
+		if err != nil {
+			return err
+		}
+		_, err = e.Write(b)
+		return err
 	default:
 		panic("unsupported type passed to encode")
 	}
@@ -121,7 +132,7 @@ func NewEncoder(w io.Writer) Encoder {
 	return Encoder{w}
 }
 
-func Encode(v any) ([]byte, error) {
+func Marshal(v any) ([]byte, error) {
 	var b bytes.Buffer
 	e := NewEncoder(&b)
 	if err := e.Encode(v); err != nil {

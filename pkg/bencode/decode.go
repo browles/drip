@@ -138,7 +138,7 @@ func NewDecoder(r io.Reader) *Decoder {
 	return &Decoder{*bufio.NewReader(r)}
 }
 
-func Decode(b []byte) (any, error) {
+func Unmarshal(b []byte) (any, error) {
 	d := NewDecoder(bytes.NewReader(b))
 	return d.Decode()
 }
