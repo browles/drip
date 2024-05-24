@@ -112,9 +112,15 @@ func Test_decoder_decodeDictionary(t *testing.T) {
 	}{
 		{"empty dict", "de", make(map[string]any), false},
 		{"one item", "d3:key5:valuee", map[string]any{"key": "value"}, false},
-		{"nested dict", "d3:keyd4:key2i0eee", map[string]any{"key": map[string]any{"key2": int64(0)}}, false},
 		{
-			"nested list", "d3:keyli123ed4:key2i456eeee",
+			"nested dict",
+			"d3:keyd4:key2i0eee",
+			map[string]any{"key": map[string]any{"key2": int64(0)}},
+			false,
+		},
+		{
+			"nested list",
+			"d3:keyli123ed4:key2i456eeee",
 			map[string]any{
 				"key": []any{int64(123), map[string]any{"key2": int64(456)}},
 			},
