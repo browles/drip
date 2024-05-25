@@ -33,7 +33,7 @@ func Test_Encoder_encodeString(t *testing.T) {
 			be := newStringEncoder()
 			be.e.encodeString(reflect.ValueOf(tt.s))
 			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("got %v, want %v", got, tt.want)
+				t.Errorf("Encoder.encodeString() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -42,19 +42,39 @@ func Test_Encoder_encodeString(t *testing.T) {
 func Test_Encoder_encodeInt(t *testing.T) {
 	tests := []struct {
 		name string
-		i    int64
+		i    any
 		want string
 	}{
-		{"positive", 123, "i123e"},
-		{"negative", -456, "i-456e"},
-		{"zero", 0, "i0e"},
+		{"positive", int(123), "i123e"},
+		{"negative", int16(-456), "i-456e"},
+		{"zero", int64(0), "i0e"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			be := newStringEncoder()
 			be.e.encodeInt(reflect.ValueOf(tt.i))
 			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("got %v, want %v", got, tt.want)
+				t.Errorf("Encoder.encodeInt() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_Encoder_encodeUint(t *testing.T) {
+	tests := []struct {
+		name string
+		i    any
+		want string
+	}{
+		{"positive", uint(123), "i123e"},
+		{"zero", uint64(0), "i0e"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			be := newStringEncoder()
+			be.e.encodeUint(reflect.ValueOf(tt.i))
+			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Encoder.encodeUint() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -76,7 +96,7 @@ func Test_Encoder_encodeSlice(t *testing.T) {
 			be := newStringEncoder()
 			be.e.encodeSlice(reflect.ValueOf(tt.l))
 			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("got %v, want %v", got, tt.want)
+				t.Errorf("Encoder.encodeSlice() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -99,7 +119,7 @@ func Test_Encoder_encodeMap(t *testing.T) {
 			be := newStringEncoder()
 			be.e.encodeMap(reflect.ValueOf(tt.d))
 			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("got %v, want %v", got, tt.want)
+				t.Errorf("Encoder.encodeMap() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -230,7 +250,7 @@ func TestEncoder_encodeStruct(t *testing.T) {
 			be := newStringEncoder()
 			be.e.encodeStruct(reflect.ValueOf(tt.s))
 			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("got %v, want %v", got, tt.want)
+				t.Errorf("Encoder.encodeStruct() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -261,11 +281,11 @@ func TestMarshal(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := Marshal(tt.v)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Encode() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("Marshal() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(string(got), tt.want) {
-				t.Errorf("Encode() = %v, want %v", string(got), tt.want)
+				t.Errorf("Marshal() = %v, want %v", string(got), tt.want)
 			}
 		})
 	}

@@ -17,6 +17,14 @@ type Encoder struct {
 	io.Writer
 }
 
+type UnsupportedTypeError struct {
+	reflect.Type
+}
+
+func (e *UnsupportedTypeError) Error() string {
+	return "bencode: unsupported type: " + e.Type.String()
+}
+
 func (e *Encoder) WriteByte(c byte) error {
 	_, err := e.Write([]byte{c})
 	return err
@@ -40,9 +48,6 @@ func (e *Encoder) encodeMarshaler(v reflect.Value) error {
 }
 
 func (e *Encoder) encodeString(v reflect.Value) error {
-	if v.Kind() != reflect.String {
-		panic("passed value is not of kind string")
-	}
 	s := v.String()
 	if _, err := e.WriteString(strconv.Itoa(len(s))); err != nil {
 		return err
@@ -110,6 +115,11 @@ func (e *Encoder) encodeMap(v reflect.Value) error {
 		return err
 	}
 	keys := v.MapKeys()
+	if len(keys) > 0 {
+		if keys[0].Kind() != reflect.String {
+			return &UnsupportedTypeError{keys[0].Type()}
+		}
+	}
 	slices.SortFunc(keys, func(a, b reflect.Value) int {
 		return strings.Compare(a.String(), b.String())
 	})
@@ -184,14 +194,14 @@ func getFieldsForStruct(v reflect.Value) []*field {
 				} else {
 					if ef, ok := fieldMap[key]; ok {
 						if len(ef.index) < len(f.index) || ef.ignored {
-							// Existing field has lower depth, do not replace.
-							// Or, field is already ignored from a previous conflict.
+							// Existing field has lower depth, or field is already ignored
+							// from a previous conflict, do not replace.
 							continue
 						}
 						if (f.tag != "" && f.tag == ef.tag) ||
 							(ef.tag == "" && f.name == ef.name) {
-							// Existing field has the same tag, ignore.
-							// Or, neither fields have tags but share a name, ignore.
+							// Existing field has the same tag, or neither fields have tags
+							// but share a name, ignore.
 							fieldMap[key].ignored = true
 						} else if f.tag != "" && ef.tag == "" {
 							// New field has a tag while existing does not, replace.
@@ -205,11 +215,11 @@ func getFieldsForStruct(v reflect.Value) []*field {
 		}
 	}
 	var fields []*field
-	for k := range fieldMap {
-		if fieldMap[k].ignored {
+	for _, f := range fieldMap {
+		if f.ignored {
 			continue
 		}
-		fields = append(fields, fieldMap[k])
+		fields = append(fields, f)
 	}
 	slices.SortFunc(fields, func(a, b *field) int {
 		return strings.Compare(a.key, b.key)
@@ -272,7 +282,7 @@ func (e *Encoder) encode(v reflect.Value) error {
 		}
 		return e.encode(v.Elem())
 	default:
-		panic("unsupported type passed to encode")
+		return &UnsupportedTypeError{v.Type()}
 	}
 }
 
