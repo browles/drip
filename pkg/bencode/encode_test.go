@@ -14,8 +14,39 @@ type stringEncoder struct {
 
 func newStringEncoder() *stringEncoder {
 	b := &bytes.Buffer{}
-	e := Encoder{b}
+	e := Encoder{Writer: b}
 	return &stringEncoder{b, e}
+}
+
+type bencodingMarshaler struct {
+	s string
+}
+
+func (b *bencodingMarshaler) MarshalBencoding() ([]byte, error) {
+	var bu bytes.Buffer
+	bu.WriteString(strconv.Itoa(len(b.s)))
+	bu.WriteByte(':')
+	bu.WriteString(b.s)
+	return bu.Bytes(), nil
+}
+
+func TestEncoder_encodeMarshaler(t *testing.T) {
+	tests := []struct {
+		name string
+		v    any
+		want string
+	}{
+		{"custom marshaler", &bencodingMarshaler{"asdf"}, "4:asdf"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			be := newStringEncoder()
+			be.e.encodeMarshaler(reflect.ValueOf(tt.v))
+			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Encoder.encodeMarshaler() = %v, want %v", string(got), tt.want)
+			}
+		})
+	}
 }
 
 func Test_Encoder_encodeString(t *testing.T) {
@@ -86,9 +117,10 @@ func Test_Encoder_encodeSlice(t *testing.T) {
 		l    []any
 		want string
 	}{
-		{"empty list", []any{}, "le"},
+		{"nil slice", nil, ""},
+		{"empty slice", []any{}, "le"},
 		{"one item", []any{123}, "li123ee"},
-		{"nested list", []any{[]any{1, 2}}, "lli1ei2eee"},
+		{"nested slice", []any{[]any{1, 2}}, "lli1ei2eee"},
 		{"mixed type", []any{123, "asdf", []any{456}}, "li123e4:asdfli456eee"},
 	}
 	for _, tt := range tests {
@@ -108,11 +140,12 @@ func Test_Encoder_encodeMap(t *testing.T) {
 		d    map[string]any
 		want string
 	}{
-		{"empty dict", map[string]any{}, "de"},
+		{"nil map", nil, ""},
+		{"empty map", map[string]any{}, "de"},
 		{"one item", map[string]any{"key": "value"}, "d3:key5:valuee"},
 		{"unsorted keys", map[string]any{"b": 2, "c": 3, "a": 1}, "d1:ai1e1:bi2e1:ci3ee"},
-		{"nested dict", map[string]any{"key": map[string]any{"key2": 0}}, "d3:keyd4:key2i0eee"},
-		{"nested list", map[string]any{"key": []any{123, map[string]any{"key2": 456}}}, "d3:keyli123ed4:key2i456eeee"},
+		{"nested map", map[string]any{"key": map[string]any{"key2": 0}}, "d3:keyd4:key2i0eee"},
+		{"nested slice", map[string]any{"key": []any{123, map[string]any{"key2": 456}}}, "d3:keyli123ed4:key2i456eeee"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -154,12 +187,19 @@ func TestEncoder_encodeStruct(t *testing.T) {
 		A      int
 		simple `bencode:"embedded"`
 	}
+	type cycle struct {
+		A *cycle
+		X int
+	}
+	cyclical := cycle{X: 1}
+	cyclical.A = &cyclical
 	tests := []struct {
-		name string
-		s    any
-		want string
+		name    string
+		s       any
+		want    string
+		wantErr bool
 	}{
-		{"empty struct", struct{}{}, "de"},
+		{"empty struct", struct{}{}, "de", false},
 		{
 			"tags",
 			struct {
@@ -171,6 +211,7 @@ func TestEncoder_encodeStruct(t *testing.T) {
 				1, 2, 3, 4,
 			},
 			"d5:a_tagi1e5:notagi2ee",
+			false,
 		},
 		{
 			"nested struct",
@@ -179,6 +220,7 @@ func TestEncoder_encodeStruct(t *testing.T) {
 				Nested: &simple{X: 2, Y: 3, z: 4},
 			},
 			"d1:ai1e6:nestedd1:xi2e1:yi3eee",
+			false,
 		},
 		{
 			"nil nested struct",
@@ -187,6 +229,7 @@ func TestEncoder_encodeStruct(t *testing.T) {
 				Nested: nil,
 			},
 			"d1:ai1ee",
+			false,
 		},
 		{
 			"embedded struct",
@@ -197,6 +240,7 @@ func TestEncoder_encodeStruct(t *testing.T) {
 				Z:      44,
 			},
 			"d1:ai22e1:xi1e1:yi33e1:zi44ee",
+			false,
 		},
 		{
 			"deeply embedded struct",
@@ -210,6 +254,7 @@ func TestEncoder_encodeStruct(t *testing.T) {
 				A: 99,
 			},
 			"d1:ai99e1:xi1e1:yi33e1:zi44ee",
+			false,
 		},
 		// To match the behavior of json.Marshal, ignore fields with the same name
 		// at the same level of embedding. "Y" should be ignored here, but e.g. "X"
@@ -227,6 +272,7 @@ func TestEncoder_encodeStruct(t *testing.T) {
 				simple: simple{X: 55, Y: 66, z: 77},
 			},
 			"d1:ai11e1:xi55e1:zi44ee",
+			false,
 		},
 		{
 			"conflicting field bencoding names",
@@ -235,6 +281,7 @@ func TestEncoder_encodeStruct(t *testing.T) {
 				B: 2,
 			},
 			"d1:ai2ee",
+			false,
 		},
 		{
 			"tagged embedded struct",
@@ -243,49 +290,27 @@ func TestEncoder_encodeStruct(t *testing.T) {
 				simple: simple{X: 1, Y: 2, z: 3},
 			},
 			"d1:ai22e8:embeddedd1:xi1e1:yi2eee",
+			false,
+		},
+		{
+			"cyclical struct",
+			cyclical,
+			"",
+			true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			be := newStringEncoder()
-			be.e.encodeStruct(reflect.ValueOf(tt.s))
-			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Encoder.encodeStruct() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-type bencodingMarshaler struct {
-	s string
-}
-
-func (b *bencodingMarshaler) MarshalBencoding() ([]byte, error) {
-	var bu bytes.Buffer
-	bu.WriteString(strconv.Itoa(len(b.s)))
-	bu.WriteByte(':')
-	bu.WriteString(b.s)
-	return bu.Bytes(), nil
-}
-
-func TestMarshal(t *testing.T) {
-	tests := []struct {
-		name    string
-		v       any
-		want    string
-		wantErr bool
-	}{
-		{"custom marshaler", &bencodingMarshaler{"asdf"}, "4:asdf", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := Marshal(tt.v)
+			err := be.e.encodeStruct(reflect.ValueOf(tt.s))
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Marshal() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("Encode.encodeStruct() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
 				return
 			}
-			if !reflect.DeepEqual(string(got), tt.want) {
-				t.Errorf("Marshal() = %v, want %v", string(got), tt.want)
+			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Encoder.encodeStruct() = %v, want %v", got, tt.want)
 			}
 		})
 	}

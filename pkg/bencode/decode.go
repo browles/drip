@@ -9,8 +9,37 @@ import (
 	"strconv"
 )
 
+func Unmarshal(b []byte) (any, error) {
+	d := NewDecoder(bytes.NewReader(b))
+	return d.Decode()
+}
+
 type Decoder struct {
 	bufio.Reader
+}
+
+func NewDecoder(r io.Reader) *Decoder {
+	return &Decoder{*bufio.NewReader(r)}
+}
+
+func (d *Decoder) Decode() (any, error) {
+	b, err := d.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+	if err = d.UnreadByte(); err != nil {
+		return nil, err
+	}
+	switch b {
+	case 'i':
+		return d.decodeInt()
+	case 'l':
+		return d.decodeList()
+	case 'd':
+		return d.decodeDictionary()
+	default:
+		return d.decodeString()
+	}
 }
 
 func (d *Decoder) decodeString() (string, error) {
@@ -112,33 +141,4 @@ func (d *Decoder) decodeDictionary() (map[string]any, error) {
 		dict[key] = value
 	}
 	return dict, nil
-}
-
-func (d *Decoder) Decode() (any, error) {
-	b, err := d.ReadByte()
-	if err != nil {
-		return nil, err
-	}
-	if err = d.UnreadByte(); err != nil {
-		return nil, err
-	}
-	switch b {
-	case 'i':
-		return d.decodeInt()
-	case 'l':
-		return d.decodeList()
-	case 'd':
-		return d.decodeDictionary()
-	default:
-		return d.decodeString()
-	}
-}
-
-func NewDecoder(r io.Reader) *Decoder {
-	return &Decoder{*bufio.NewReader(r)}
-}
-
-func Unmarshal(b []byte) (any, error) {
-	d := NewDecoder(bytes.NewReader(b))
-	return d.Decode()
 }

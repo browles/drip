@@ -13,16 +13,28 @@ type Marshaler interface {
 	MarshalBencoding() ([]byte, error)
 }
 
+func Marshal(v any) ([]byte, error) {
+	var b bytes.Buffer
+	e := NewEncoder(&b)
+	if err := e.Encode(v); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
 type Encoder struct {
 	io.Writer
+	ptrDepth int
 }
 
-type UnsupportedTypeError struct {
-	reflect.Type
+const ptrDepthLimit = 1000
+
+func NewEncoder(w io.Writer) Encoder {
+	return Encoder{Writer: w}
 }
 
-func (e *UnsupportedTypeError) Error() string {
-	return "bencode: unsupported type: " + e.Type.String()
+func (e *Encoder) Encode(v any) error {
+	return e.encode(reflect.ValueOf(v))
 }
 
 func (e *Encoder) WriteByte(c byte) error {
@@ -32,6 +44,22 @@ func (e *Encoder) WriteByte(c byte) error {
 
 func (e *Encoder) WriteString(s string) (n int, err error) {
 	return io.WriteString(e.Writer, s)
+}
+
+type UnsupportedTypeError struct {
+	reflect.Type
+}
+
+func (e *UnsupportedTypeError) Error() string {
+	return "bencode: unsupported type: " + e.String()
+}
+
+type UnsupportedValueError struct {
+	msg string
+}
+
+func (e *UnsupportedValueError) Error() string {
+	return "bencode: unsupported value: " + e.msg
 }
 
 func (e *Encoder) encodeMarshaler(v reflect.Value) error {
@@ -93,6 +121,9 @@ func (e *Encoder) encodeSlice(v reflect.Value) error {
 	if v.IsNil() {
 		return nil
 	}
+	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
+		return &UnsupportedValueError{"maximum pointer depth exceeded"}
+	}
 	if err := e.WriteByte('l'); err != nil {
 		return err
 	}
@@ -104,12 +135,16 @@ func (e *Encoder) encodeSlice(v reflect.Value) error {
 	if err := e.WriteByte('e'); err != nil {
 		return err
 	}
+	e.ptrDepth--
 	return nil
 }
 
 func (e *Encoder) encodeMap(v reflect.Value) error {
 	if v.IsNil() {
 		return nil
+	}
+	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
+		return &UnsupportedValueError{"maximum pointer depth exceeded"}
 	}
 	if err := e.WriteByte('d'); err != nil {
 		return err
@@ -134,6 +169,7 @@ func (e *Encoder) encodeMap(v reflect.Value) error {
 	if err := e.WriteByte('e'); err != nil {
 		return err
 	}
+	e.ptrDepth--
 	return nil
 }
 
@@ -149,12 +185,16 @@ type field struct {
 
 func getFieldsForStruct(v reflect.Value) []*field {
 	fieldMap := make(map[string]*field)
-	curr := []*field{}
-	next := []*field{{typ: v.Type()}}
+	visited := make(map[reflect.Type]struct{})
+	curr, next := []*field{}, []*field{{typ: v.Type()}}
 	for len(next) > 0 {
 		curr, next = next, curr[:0]
 		for _, structField := range curr {
 			t := structField.typ
+			if _, ok := visited[t]; ok {
+				continue
+			}
+			visited[t] = struct{}{}
 			for j := range t.NumField() {
 				sf := t.Field(j)
 				ft := sf.Type
@@ -162,6 +202,8 @@ func getFieldsForStruct(v reflect.Value) []*field {
 					if ft.Kind() == reflect.Pointer {
 						ft = ft.Elem()
 					}
+					// If anonymous struct field is not exported, we still need to account
+					// for exported embedded fields.
 					if !sf.IsExported() && ft.Kind() != reflect.Struct {
 						continue
 					}
@@ -237,6 +279,9 @@ func isNil(v reflect.Value) bool {
 }
 
 func (e *Encoder) encodeStruct(v reflect.Value) error {
+	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
+		return &UnsupportedValueError{"maximum pointer depth exceeded"}
+	}
 	if err := e.WriteByte('d'); err != nil {
 		return err
 	}
@@ -248,12 +293,17 @@ func (e *Encoder) encodeStruct(v reflect.Value) error {
 		if fv.Kind() == reflect.Pointer {
 			fv = fv.Elem()
 		}
-		e.encodeString(reflect.ValueOf(f.key))
-		e.encode(fv)
+		if err := e.encodeString(reflect.ValueOf(f.key)); err != nil {
+			return err
+		}
+		if err := e.encode(fv); err != nil {
+			return err
+		}
 	}
 	if err := e.WriteByte('e'); err != nil {
 		return err
 	}
+	e.ptrDepth--
 	return nil
 }
 
@@ -284,21 +334,4 @@ func (e *Encoder) encode(v reflect.Value) error {
 	default:
 		return &UnsupportedTypeError{v.Type()}
 	}
-}
-
-func (e *Encoder) Encode(v any) error {
-	return e.encode(reflect.ValueOf(v))
-}
-
-func NewEncoder(w io.Writer) Encoder {
-	return Encoder{w}
-}
-
-func Marshal(v any) ([]byte, error) {
-	var b bytes.Buffer
-	e := NewEncoder(&b)
-	if err := e.Encode(v); err != nil {
-		return nil, err
-	}
-	return b.Bytes(), nil
 }
