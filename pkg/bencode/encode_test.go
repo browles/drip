@@ -36,7 +36,7 @@ func TestEncoder_encodeMarshaler(t *testing.T) {
 		v    any
 		want string
 	}{
-		{"custom marshaler", &bencodingMarshaler{"asdf"}, "4:asdf"},
+		{"marshaler", &bencodingMarshaler{"asdf"}, "4:asdf"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -49,7 +49,7 @@ func TestEncoder_encodeMarshaler(t *testing.T) {
 	}
 }
 
-func Test_Encoder_encodeString(t *testing.T) {
+func TestEncoder_encodeString(t *testing.T) {
 	tests := []struct {
 		name string
 		s    string
@@ -70,7 +70,7 @@ func Test_Encoder_encodeString(t *testing.T) {
 	}
 }
 
-func Test_Encoder_encodeInt(t *testing.T) {
+func TestEncoder_encodeInt(t *testing.T) {
 	tests := []struct {
 		name string
 		i    any
@@ -91,7 +91,7 @@ func Test_Encoder_encodeInt(t *testing.T) {
 	}
 }
 
-func Test_Encoder_encodeUint(t *testing.T) {
+func TestEncoder_encodeUint(t *testing.T) {
 	tests := []struct {
 		name string
 		i    any
@@ -111,7 +111,7 @@ func Test_Encoder_encodeUint(t *testing.T) {
 	}
 }
 
-func Test_Encoder_encodeSlice(t *testing.T) {
+func TestEncoder_encodeSlice(t *testing.T) {
 	tests := []struct {
 		name string
 		l    []any
@@ -134,7 +134,7 @@ func Test_Encoder_encodeSlice(t *testing.T) {
 	}
 }
 
-func Test_Encoder_encodeMap(t *testing.T) {
+func TestEncoder_encodeMap(t *testing.T) {
 	tests := []struct {
 		name string
 		d    map[string]any
@@ -187,11 +187,11 @@ func TestEncoder_encodeStruct(t *testing.T) {
 		A      int
 		simple `bencode:"embedded"`
 	}
-	type cycle struct {
-		A *cycle
+	type recursive struct {
+		A *recursive
 		X int
 	}
-	cyclical := cycle{X: 1}
+	cyclical := recursive{X: 1}
 	cyclical.A = &cyclical
 	tests := []struct {
 		name    string
@@ -256,9 +256,6 @@ func TestEncoder_encodeStruct(t *testing.T) {
 			"d1:ai99e1:xi1e1:yi33e1:zi44ee",
 			false,
 		},
-		// To match the behavior of json.Marshal, ignore fields with the same name
-		// at the same level of embedding. "Y" should be ignored here, but e.g. "X"
-		// should not, because the "higher" X takes priority.
 		{
 			"conflicting field names embedded struct",
 			conflictingEmbedded{

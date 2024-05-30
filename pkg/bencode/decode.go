@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strconv"
+	"unicode"
 )
 
-func Unmarshal(b []byte) (any, error) {
+func Unmarshal(b []byte, v any) error {
 	d := NewDecoder(bytes.NewReader(b))
-	return d.Decode()
+	return d.Decode(v)
 }
 
 type Decoder struct {
@@ -22,123 +24,423 @@ func NewDecoder(r io.Reader) *Decoder {
 	return &Decoder{*bufio.NewReader(r)}
 }
 
-func (d *Decoder) Decode() (any, error) {
-	b, err := d.ReadByte()
-	if err != nil {
-		return nil, err
+func (d *Decoder) Decode(v any) error {
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Interface {
+		rv = rv.Elem()
 	}
-	if err = d.UnreadByte(); err != nil {
-		return nil, err
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return errors.New("bencode: must decode into non-nil pointer")
 	}
-	switch b {
-	case 'i':
-		return d.decodeInt()
-	case 'l':
-		return d.decodeList()
-	case 'd':
-		return d.decodeDictionary()
+	return d.decode(rv)
+}
+
+type Unmarshaler interface {
+	UnmarshalBencoding([]byte) error
+}
+
+func newParseError(t string, args ...any) error {
+	return fmt.Errorf("bencode: parse error: "+t, args...)
+}
+
+var unmarshalerType = reflect.TypeFor[Unmarshaler]()
+
+func (d *Decoder) decode(v reflect.Value) error {
+	if v.Type().Implements(unmarshalerType) {
+		return d.decodeUnmarshaler(v)
+	}
+	switch v.Kind() {
+	case reflect.String:
+		return d.decodeString(v)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return d.decodeInt(v)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return d.decodeUint(v)
+	case reflect.Slice:
+		return d.decodeSlice(v)
+	case reflect.Map:
+		return d.decodeMap(v)
+	case reflect.Struct:
+		return d.decodeStruct(v)
+	case reflect.Interface:
+		return d.decodeInterface(v)
+	case reflect.Pointer:
+		return d.decode(v.Elem())
 	default:
-		return d.decodeString()
+		return &UnsupportedTypeError{v.Type()}
 	}
 }
 
-func (d *Decoder) decodeString() (string, error) {
+func (d *Decoder) decodeUnmarshaler(v reflect.Value) error {
+	m, ok := v.Interface().(Unmarshaler)
+	if !ok {
+		panic("passed value does not implement Unmarshaler")
+	}
+	var b bytes.Buffer
+	if err := d.consume(&b); err != nil {
+		return err
+	}
+	return m.UnmarshalBencoding(b.Bytes())
+}
+
+func (d *Decoder) consume(buf *bytes.Buffer) error {
+	b, err := d.ReadByte()
+	if err != nil {
+		return err
+	}
+	if err = d.UnreadByte(); err != nil {
+		return err
+	}
+	switch b {
+	case 'i':
+		return d.consumeInt(buf)
+	case 'l':
+		return d.consumeList(buf)
+	case 'd':
+		return d.consumeDictionary(buf)
+	default:
+		if unicode.IsDigit(rune(b)) {
+			return d.consumeString(buf)
+		}
+		return newParseError("unexpected prefix: %c", b)
+	}
+}
+
+func (d *Decoder) consumeString(buf *bytes.Buffer) error {
 	lengthStr, err := d.ReadString(':')
 	if err != nil {
-		return "", err
+		return newParseError("unterminated string prefix: %w", err)
 	}
 	length, err := strconv.Atoi(lengthStr[:len(lengthStr)-1])
 	if err != nil {
-		return "", err
+		return err
 	}
 	bytes := make([]byte, length)
 	n, err := d.Read(bytes)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return "", err
+		return err
 	}
 	if n < length {
-		return "", fmt.Errorf("unexpected eof: %d < %d", n, length)
+		return newParseError("unexpected string eof: %d < %d", n, length)
 	}
-	return string(bytes), nil
+	buf.Write([]byte(lengthStr)) // lengthStr is already terminated with :
+	buf.Write(bytes)
+	return nil
 }
 
-func (d *Decoder) decodeInt() (int64, error) {
+func (d *Decoder) consumeInt(buf *bytes.Buffer) error {
 	b, err := d.ReadByte()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if b != 'i' {
-		return 0, fmt.Errorf("unexpected integer prefix: %c", b)
+		return newParseError("unexpected integer prefix: %c", b)
 	}
 	intStr, err := d.ReadString('e')
 	if err != nil {
-		return 0, err
+		return newParseError("unterminated int: %w", err)
+	}
+	_, err = strconv.ParseInt(intStr[:len(intStr)-1], 10, 64)
+	if err != nil {
+		return newParseError("ParseInt: %w", err)
+	}
+	buf.WriteByte('i')
+	buf.Write([]byte(intStr)) // intStr is already terminated with e
+	return nil
+}
+
+func (d *Decoder) consumeList(buf *bytes.Buffer) error {
+	b, err := d.ReadByte()
+	if err != nil {
+		return err
+	}
+	if b != 'l' {
+		return newParseError("unexpected list prefix: %c", b)
+	}
+	buf.WriteByte('l')
+	for {
+		c, err := d.ReadByte()
+		if err != nil {
+			return err
+		}
+		if c == 'e' {
+			break
+		}
+		if err := d.UnreadByte(); err != nil {
+			return err
+		}
+		err = d.consume(buf)
+		if err != nil {
+			return err
+		}
+	}
+	buf.WriteByte('e')
+	return nil
+}
+
+func (d *Decoder) consumeDictionary(buf *bytes.Buffer) error {
+	c, err := d.ReadByte()
+	if err != nil {
+		return err
+	}
+	if c != 'd' {
+		return newParseError("unexpected dictionary prefix: %c", c)
+	}
+	buf.WriteByte('d')
+	for {
+		c, err := d.ReadByte()
+		if err != nil {
+			return err
+		}
+		if c == 'e' {
+			break
+		}
+		if err := d.UnreadByte(); err != nil {
+			return err
+		}
+		if err := d.consumeString(buf); err != nil {
+			return err
+		}
+		if err := d.consume(buf); err != nil {
+			return err
+		}
+	}
+	buf.WriteByte('e')
+	return nil
+}
+
+func (d *Decoder) decodeString(v reflect.Value) error {
+	lengthStr, err := d.ReadString(':')
+	if err != nil {
+		return newParseError("unterminated string prefix: %w", err)
+	}
+	length, err := strconv.Atoi(lengthStr[:len(lengthStr)-1])
+	if err != nil {
+		return err
+	}
+	bytes := make([]byte, length)
+	n, err := d.Read(bytes)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if n < length {
+		return newParseError("unexpected string eof: %d < %d", n, length)
+	}
+	v.SetString(string(bytes))
+	return nil
+}
+
+func (d *Decoder) decodeInt(v reflect.Value) error {
+	b, err := d.ReadByte()
+	if err != nil {
+		return err
+	}
+	if b != 'i' {
+		return newParseError("unexpected integer prefix: %c", b)
+	}
+	intStr, err := d.ReadString('e')
+	if err != nil {
+		return newParseError("unterminated int: %w", err)
 	}
 	i, err := strconv.ParseInt(intStr[:len(intStr)-1], 10, 64)
 	if err != nil {
-		return 0, err
+		return newParseError("ParseInt: %w", err)
 	}
-	return i, nil
+	v.SetInt(i)
+	return nil
 }
 
-func (d *Decoder) decodeList() ([]any, error) {
+func (d *Decoder) decodeUint(v reflect.Value) error {
 	b, err := d.ReadByte()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if b != 'l' {
-		return nil, fmt.Errorf("unexpected list prefix: %c", b)
+	if b != 'i' {
+		return newParseError("unexpected integer prefix: %c", b)
 	}
-	var list []any
-	for {
-		c, err := d.ReadByte()
-		if err != nil {
-			return nil, err
-		}
-		if c == 'e' {
-			break
-		}
-		if err := d.UnreadByte(); err != nil {
-			return nil, err
-		}
-		decoded, err := d.Decode()
-		if err != nil {
-			return nil, err
-		}
-		list = append(list, decoded)
+	intStr, err := d.ReadString('e')
+	if err != nil {
+		return newParseError("unterminated int: %w", err)
 	}
-	return list, nil
+	i, err := strconv.ParseUint(intStr[:len(intStr)-1], 10, 64)
+	if err != nil {
+		return newParseError("ParseUint: %w", err)
+	}
+	v.SetUint(i)
+	return nil
 }
 
-func (d *Decoder) decodeDictionary() (map[string]any, error) {
-	c, err := d.ReadByte()
+func (d *Decoder) decodeSlice(v reflect.Value) error {
+	b, err := d.ReadByte()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if c != 'd' {
-		return nil, fmt.Errorf("unexpected dictionary prefix: %c", c)
+	if b != 'l' {
+		return newParseError("unexpected list prefix: %c", b)
 	}
-	dict := make(map[string]any)
+	t := v.Type()
+	if v.IsNil() {
+		v.Set(reflect.MakeSlice(t, 0, 0))
+	}
+	i := 0
 	for {
 		c, err := d.ReadByte()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if c == 'e' {
 			break
 		}
 		if err := d.UnreadByte(); err != nil {
-			return nil, err
+			return err
 		}
-		key, err := d.decodeString()
-		if err != nil {
-			return nil, err
+		if i >= v.Cap() {
+			if v.Len() > 0 {
+				v.Grow(v.Len())
+			} else {
+				v.Grow(1)
+			}
 		}
-		value, err := d.Decode()
-		if err != nil {
-			return nil, err
+		if i >= v.Len() {
+			v.SetLen(i + 1)
 		}
-		dict[key] = value
+		// Pass the pointer to check for a unmarshaler with a pointer receiver.
+		if err := d.decode(v.Index(i).Addr()); err != nil {
+			return err
+		}
+		i++
 	}
-	return dict, nil
+	return nil
+}
+
+func (d *Decoder) decodeMap(v reflect.Value) error {
+	c, err := d.ReadByte()
+	if err != nil {
+		return err
+	}
+	if c != 'd' {
+		return newParseError("unexpected dictionary prefix: %c", c)
+	}
+	t := v.Type()
+	kt := t.Key()
+	if kt.Kind() != reflect.String {
+		return &UnsupportedTypeError{v.Type()}
+	}
+	if v.IsNil() {
+		v.Set(reflect.MakeMap(t))
+	}
+	et := t.Elem()
+	for {
+		c, err := d.ReadByte()
+		if err != nil {
+			return err
+		}
+		if c == 'e' {
+			break
+		}
+		if err := d.UnreadByte(); err != nil {
+			return err
+		}
+		key := reflect.New(kt).Elem()
+		if err := d.decodeString(key); err != nil {
+			return err
+		}
+		elem := reflect.New(et)
+		// Pass the pointer to check for a unmarshaler with a pointer receiver.
+		if err := d.decode(elem); err != nil {
+			return err
+		}
+		v.SetMapIndex(key, elem.Elem())
+	}
+	return nil
+}
+
+var (
+	intType          = reflect.TypeFor[int]()
+	stringType       = reflect.TypeFor[string]()
+	anySliceType     = reflect.TypeFor[[]any]()
+	mapStringAnyType = reflect.TypeFor[map[string]any]()
+)
+
+func (d *Decoder) decodeStruct(v reflect.Value) error {
+	c, err := d.ReadByte()
+	if err != nil {
+		return err
+	}
+	if c != 'd' {
+		return newParseError("unexpected dictionary prefix: %c", c)
+	}
+	keyToField := getFieldsForStruct(v).keyToField
+	for {
+		c, err := d.ReadByte()
+		if err != nil {
+			return err
+		}
+		if c == 'e' {
+			break
+		}
+		if err := d.UnreadByte(); err != nil {
+			return err
+		}
+		key := reflect.New(stringType).Elem()
+		if err := d.decodeString(key); err != nil {
+			return err
+		}
+		field, ok := keyToField[key.String()]
+		if !ok {
+			continue
+		}
+		elem := v
+		for _, i := range field.index {
+			elem = elem.Field(i)
+			if elem.Kind() == reflect.Pointer {
+				if elem.IsNil() {
+					elem.Set(reflect.New(elem.Type().Elem()))
+				}
+				elem = elem.Elem()
+			}
+		}
+		// Pass the pointer to check for a unmarshaler with a pointer receiver.
+		if err := d.decode(elem.Addr()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *Decoder) decodeInterface(v reflect.Value) error {
+	if !v.IsNil() {
+		return d.decode(v.Elem())
+	} else if v.NumMethod() != 0 {
+		// Can only decode into an any.
+		return &UnsupportedTypeError{v.Type()}
+	}
+
+	b, err := d.ReadByte()
+	if err != nil {
+		return err
+	}
+	if err = d.UnreadByte(); err != nil {
+		return err
+	}
+	var iv reflect.Value
+	switch b {
+	case 'i':
+		iv = reflect.New(intType).Elem()
+	case 'l':
+		iv = reflect.New(anySliceType).Elem()
+	case 'd':
+		iv = reflect.New(mapStringAnyType).Elem()
+	default:
+		if unicode.IsDigit(rune(b)) {
+			iv = reflect.New(stringType).Elem()
+		} else {
+			return newParseError("unexpected prefix: %c", b)
+		}
+	}
+	if err := d.decode(iv); err != nil {
+		return err
+	}
+	v.Set(iv)
+	return nil
 }

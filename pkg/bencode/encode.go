@@ -2,16 +2,13 @@ package bencode
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 )
-
-type Marshaler interface {
-	MarshalBencoding() ([]byte, error)
-}
 
 func Marshal(v any) ([]byte, error) {
 	var b bytes.Buffer
@@ -47,19 +44,44 @@ func (e *Encoder) WriteString(s string) (n int, err error) {
 }
 
 type UnsupportedTypeError struct {
-	reflect.Type
+	Type reflect.Type
 }
 
 func (e *UnsupportedTypeError) Error() string {
-	return "bencode: unsupported type: " + e.String()
+	return "bencode: unsupported type: " + e.Type.String()
 }
 
-type UnsupportedValueError struct {
-	msg string
+type Marshaler interface {
+	MarshalBencoding() ([]byte, error)
 }
 
-func (e *UnsupportedValueError) Error() string {
-	return "bencode: unsupported value: " + e.msg
+var marshalerType = reflect.TypeFor[Marshaler]()
+
+func (e *Encoder) encode(v reflect.Value) error {
+	if v.Type().Implements(marshalerType) {
+		return e.encodeMarshaler(v)
+	}
+	switch v.Kind() {
+	case reflect.String:
+		return e.encodeString(v)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return e.encodeInt(v)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return e.encodeUint(v)
+	case reflect.Slice:
+		return e.encodeSlice(v)
+	case reflect.Map:
+		return e.encodeMap(v)
+	case reflect.Struct:
+		return e.encodeStruct(v)
+	case reflect.Interface, reflect.Pointer:
+		if v.IsNil() {
+			return nil
+		}
+		return e.encode(v.Elem())
+	default:
+		return &UnsupportedTypeError{v.Type()}
+	}
 }
 
 func (e *Encoder) encodeMarshaler(v reflect.Value) error {
@@ -122,7 +144,7 @@ func (e *Encoder) encodeSlice(v reflect.Value) error {
 		return nil
 	}
 	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
-		return &UnsupportedValueError{"maximum pointer depth exceeded"}
+		return errors.New("bencode: maximum pointer depth exceeded")
 	}
 	if err := e.WriteByte('l'); err != nil {
 		return err
@@ -143,18 +165,16 @@ func (e *Encoder) encodeMap(v reflect.Value) error {
 	if v.IsNil() {
 		return nil
 	}
+	if v.Type().Key().Kind() != reflect.String {
+		return &UnsupportedTypeError{v.Type()}
+	}
 	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
-		return &UnsupportedValueError{"maximum pointer depth exceeded"}
+		return errors.New("bencode: maximum pointer depth exceeded")
 	}
 	if err := e.WriteByte('d'); err != nil {
 		return err
 	}
 	keys := v.MapKeys()
-	if len(keys) > 0 {
-		if keys[0].Kind() != reflect.String {
-			return &UnsupportedTypeError{keys[0].Type()}
-		}
-	}
 	slices.SortFunc(keys, func(a, b reflect.Value) int {
 		return strings.Compare(a.String(), b.String())
 	})
@@ -173,6 +193,11 @@ func (e *Encoder) encodeMap(v reflect.Value) error {
 	return nil
 }
 
+type fieldInfo struct {
+	fields     []*field
+	keyToField map[string]*field
+}
+
 type field struct {
 	ignored bool
 	index   []int
@@ -183,8 +208,8 @@ type field struct {
 	field   reflect.StructField
 }
 
-func getFieldsForStruct(v reflect.Value) []*field {
-	fieldMap := make(map[string]*field)
+func getFieldsForStruct(v reflect.Value) *fieldInfo {
+	keyToField := make(map[string]*field)
 	visited := make(map[reflect.Type]struct{})
 	curr, next := []*field{}, []*field{{typ: v.Type()}}
 	for len(next) > 0 {
@@ -234,7 +259,7 @@ func getFieldsForStruct(v reflect.Value) []*field {
 				if tag == "" && sf.Anonymous && ft.Kind() == reflect.Struct {
 					next = append(next, f)
 				} else {
-					if ef, ok := fieldMap[key]; ok {
+					if ef, ok := keyToField[key]; ok {
 						if len(ef.index) < len(f.index) || ef.ignored {
 							// Existing field has lower depth, or field is already ignored
 							// from a previous conflict, do not replace.
@@ -244,20 +269,21 @@ func getFieldsForStruct(v reflect.Value) []*field {
 							(ef.tag == "" && f.name == ef.name) {
 							// Existing field has the same tag, or neither fields have tags
 							// but share a name, ignore.
-							fieldMap[key].ignored = true
+							keyToField[key].ignored = true
 						} else if f.tag != "" && ef.tag == "" {
 							// New field has a tag while existing does not, replace.
-							fieldMap[key] = f
+							keyToField[key] = f
 						}
+
 					} else {
-						fieldMap[key] = f
+						keyToField[key] = f
 					}
 				}
 			}
 		}
 	}
 	var fields []*field
-	for _, f := range fieldMap {
+	for _, f := range keyToField {
 		if f.ignored {
 			continue
 		}
@@ -266,7 +292,10 @@ func getFieldsForStruct(v reflect.Value) []*field {
 	slices.SortFunc(fields, func(a, b *field) int {
 		return strings.Compare(a.key, b.key)
 	})
-	return fields
+	return &fieldInfo{
+		fields:     fields,
+		keyToField: keyToField,
+	}
 }
 
 func isNil(v reflect.Value) bool {
@@ -280,12 +309,12 @@ func isNil(v reflect.Value) bool {
 
 func (e *Encoder) encodeStruct(v reflect.Value) error {
 	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
-		return &UnsupportedValueError{"maximum pointer depth exceeded"}
+		return errors.New("bencode: maximum pointer depth exceeded")
 	}
 	if err := e.WriteByte('d'); err != nil {
 		return err
 	}
-	for _, f := range getFieldsForStruct(v) {
+	for _, f := range getFieldsForStruct(v).fields {
 		fv := v.FieldByIndex(f.index)
 		if isNil(fv) {
 			continue
@@ -305,33 +334,4 @@ func (e *Encoder) encodeStruct(v reflect.Value) error {
 	}
 	e.ptrDepth--
 	return nil
-}
-
-var marshalerType = reflect.TypeFor[Marshaler]()
-
-func (e *Encoder) encode(v reflect.Value) error {
-	if v.Type().Implements(marshalerType) {
-		return e.encodeMarshaler(v)
-	}
-	switch v.Kind() {
-	case reflect.String:
-		return e.encodeString(v)
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return e.encodeInt(v)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return e.encodeUint(v)
-	case reflect.Slice:
-		return e.encodeSlice(v)
-	case reflect.Map:
-		return e.encodeMap(v)
-	case reflect.Struct:
-		return e.encodeStruct(v)
-	case reflect.Interface, reflect.Pointer:
-		if v.IsNil() {
-			return nil
-		}
-		return e.encode(v.Elem())
-	default:
-		return &UnsupportedTypeError{v.Type()}
-	}
 }
