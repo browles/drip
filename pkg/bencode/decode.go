@@ -116,12 +116,9 @@ func (d *Decoder) consumeString(buf *bytes.Buffer) error {
 		return err
 	}
 	bytes := make([]byte, length)
-	n, err := d.Read(bytes)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-	if n < length {
-		return newParseError("unexpected string eof: %d < %d", n, length)
+	n, err := io.ReadFull(d, bytes)
+	if err != nil {
+		return newParseError("unexpected string eof: %d < %d: %w", n, length, err)
 	}
 	buf.Write([]byte(lengthStr)) // lengthStr is already terminated with :
 	buf.Write(bytes)
@@ -219,12 +216,9 @@ func (d *Decoder) decodeString(v reflect.Value) error {
 		return err
 	}
 	bytes := make([]byte, length)
-	n, err := d.Read(bytes)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-	if n < length {
-		return newParseError("unexpected string eof: %d < %d", n, length)
+	n, err := io.ReadFull(d, bytes)
+	if err != nil {
+		return newParseError("unexpected string eof: %d < %d: %w", n, length, err)
 	}
 	v.SetString(string(bytes))
 	return nil
@@ -388,6 +382,10 @@ func (d *Decoder) decodeStruct(v reflect.Value) error {
 		}
 		field, ok := keyToField[key.String()]
 		if !ok {
+			var b bytes.Buffer
+			if err := d.consume(&b); err != nil {
+				return err
+			}
 			continue
 		}
 		elem := v
