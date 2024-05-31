@@ -16,14 +16,56 @@ func new[T any]() reflect.Value {
 	return reflect.New(t)
 }
 
-type bencodingUnmarshaler string
+type stringUnmarshaler string
 
-func (b *bencodingUnmarshaler) UnmarshalBencoding(data []byte) error {
+func (u *stringUnmarshaler) UnmarshalBencoding(data []byte) error {
 	var s string
 	if err := Unmarshal(data, &s); err != nil {
 		return err
 	}
-	*b = bencodingUnmarshaler("prefix-" + s)
+	*u = stringUnmarshaler("prefix-" + s)
+	return nil
+}
+
+type intUnmarshaler int64
+
+func (u *intUnmarshaler) UnmarshalBencoding(data []byte) error {
+	var i int64
+	if err := Unmarshal(data, &i); err != nil {
+		return err
+	}
+	*u = intUnmarshaler(i / 1000)
+	return nil
+}
+
+type listUnmarshaler []string
+
+func (u *listUnmarshaler) UnmarshalBencoding(data []byte) error {
+	var s []string
+	if err := Unmarshal(data, &s); err != nil {
+		return err
+	}
+	*u = (*u)[:0]
+	for _, st := range s {
+		*u = append(*u, strings.ToUpper(st))
+	}
+	return nil
+}
+
+type dictUnmarshaler struct {
+	A, B, c int
+}
+
+func (u *dictUnmarshaler) UnmarshalBencoding(data []byte) error {
+	var m map[string]int
+	if err := Unmarshal(data, &m); err != nil {
+		return err
+	}
+	*u = dictUnmarshaler{
+		A: m["a word"],
+		B: m["b word"],
+		c: 123,
+	}
 	return nil
 }
 
@@ -35,20 +77,23 @@ func TestDecoder_decodeUnmarshaler(t *testing.T) {
 		want    any
 		wantErr bool
 	}{
-		{"unmarshaler", new[bencodingUnmarshaler](), "3:abc", bencodingUnmarshaler("prefix-abc"), false},
+		{"string unmarshaler", new[stringUnmarshaler](), "3:abc", stringUnmarshaler("prefix-abc"), false},
+		{"int unmarshaler", new[intUnmarshaler](), "i12345e", intUnmarshaler(12), false},
+		{"list unmarshaler", new[listUnmarshaler](), "l3:abc4:defge", listUnmarshaler{"ABC", "DEFG"}, false},
+		{"dict unmarshaler", new[dictUnmarshaler](), "d6:a wordi1e6:b wordi2ee", dictUnmarshaler{A: 1, B: 2, c: 123}, false},
 		{
 			"unmarshaler field",
 			new[struct {
 				X int
-				B bencodingUnmarshaler
+				B stringUnmarshaler
 			}](),
 			"d1:b3:abc1:xi123ee",
 			struct {
 				X int
-				B bencodingUnmarshaler
+				B stringUnmarshaler
 			}{
 				X: 123,
-				B: bencodingUnmarshaler("prefix-abc"),
+				B: stringUnmarshaler("prefix-abc"),
 			},
 			false,
 		},
@@ -61,7 +106,7 @@ func TestDecoder_decodeUnmarshaler(t *testing.T) {
 				t.Errorf("Decoder.decodeUnmarshaler() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if got := reflect.Indirect(tt.v).Interface(); got != tt.want {
+			if got := reflect.Indirect(tt.v).Interface(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Decoder.decodeUnmarshaler() = %v, want %v", got, tt.want)
 			}
 		})
@@ -371,6 +416,16 @@ func TestDecoder_decodeStruct(t *testing.T) {
 			"tagged embedded struct",
 			new[taggedEmbedded](),
 			"d1:ai22e8:embeddedd1:xi1e1:yi2eee",
+			taggedEmbedded{
+				A:      22,
+				simple: simple{X: 1, Y: 2, z: 0},
+			},
+			false,
+		},
+		{
+			"skipped fields",
+			new[taggedEmbedded](),
+			"d1:ai22e1:b5:abcde1:ci12345e8:embeddedd1:xi1e1:yi2eee",
 			taggedEmbedded{
 				A:      22,
 				simple: simple{X: 1, Y: 2, z: 0},

@@ -120,8 +120,10 @@ func (d *Decoder) consumeString(buf *bytes.Buffer) error {
 	if err != nil {
 		return newParseError("unexpected string eof: %d < %d: %w", n, length, err)
 	}
-	buf.Write([]byte(lengthStr)) // lengthStr is already terminated with :
-	buf.Write(bytes)
+	if buf != nil {
+		buf.Write([]byte(lengthStr)) // lengthStr is already terminated with :
+		buf.Write(bytes)
+	}
 	return nil
 }
 
@@ -141,8 +143,10 @@ func (d *Decoder) consumeInt(buf *bytes.Buffer) error {
 	if err != nil {
 		return newParseError("ParseInt: %w", err)
 	}
-	buf.WriteByte('i')
-	buf.Write([]byte(intStr)) // intStr is already terminated with e
+	if buf != nil {
+		buf.WriteByte('i')
+		buf.Write([]byte(intStr)) // intStr is already terminated with e
+	}
 	return nil
 }
 
@@ -154,7 +158,9 @@ func (d *Decoder) consumeList(buf *bytes.Buffer) error {
 	if b != 'l' {
 		return newParseError("unexpected list prefix: %c", b)
 	}
-	buf.WriteByte('l')
+	if buf != nil {
+		buf.WriteByte('l')
+	}
 	for {
 		c, err := d.ReadByte()
 		if err != nil {
@@ -171,7 +177,9 @@ func (d *Decoder) consumeList(buf *bytes.Buffer) error {
 			return err
 		}
 	}
-	buf.WriteByte('e')
+	if buf != nil {
+		buf.WriteByte('e')
+	}
 	return nil
 }
 
@@ -183,7 +191,9 @@ func (d *Decoder) consumeDictionary(buf *bytes.Buffer) error {
 	if c != 'd' {
 		return newParseError("unexpected dictionary prefix: %c", c)
 	}
-	buf.WriteByte('d')
+	if buf != nil {
+		buf.WriteByte('d')
+	}
 	for {
 		c, err := d.ReadByte()
 		if err != nil {
@@ -202,7 +212,9 @@ func (d *Decoder) consumeDictionary(buf *bytes.Buffer) error {
 			return err
 		}
 	}
-	buf.WriteByte('e')
+	if buf != nil {
+		buf.WriteByte('e')
+	}
 	return nil
 }
 
@@ -382,8 +394,7 @@ func (d *Decoder) decodeStruct(v reflect.Value) error {
 		}
 		field, ok := keyToField[key.String()]
 		if !ok {
-			var b bytes.Buffer
-			if err := d.consume(&b); err != nil {
+			if err := d.consume(nil); err != nil {
 				return err
 			}
 			continue
