@@ -62,9 +62,6 @@ func (e *Encoder) encode(v reflect.Value) error {
 	if v.Type().Implements(marshalerType) {
 		return e.encodeMarshaler(v)
 	}
-	if v.Type() == byteSliceType {
-		return e.encodeBytes(v)
-	}
 	switch v.Kind() {
 	case reflect.String:
 		return e.encodeString(v)
@@ -73,6 +70,9 @@ func (e *Encoder) encode(v reflect.Value) error {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return e.encodeUint(v)
 	case reflect.Slice:
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			return e.encodeBytes(v)
+		}
 		return e.encodeSlice(v)
 	case reflect.Map:
 		return e.encodeMap(v)

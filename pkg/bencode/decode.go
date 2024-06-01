@@ -50,9 +50,6 @@ func (d *Decoder) decode(v reflect.Value) error {
 	if v.Type().Implements(unmarshalerType) {
 		return d.decodeUnmarshaler(v)
 	}
-	if v.Type() == byteSliceType {
-		return d.decodeString(v)
-	}
 	switch v.Kind() {
 	case reflect.String:
 		return d.decodeString(v)
@@ -60,7 +57,12 @@ func (d *Decoder) decode(v reflect.Value) error {
 		return d.decodeInt(v)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return d.decodeUint(v)
-	case reflect.Slice, reflect.Array:
+	case reflect.Slice:
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			return d.decodeString(v)
+		}
+		return d.decodeSlice(v)
+	case reflect.Array:
 		return d.decodeSlice(v)
 	case reflect.Map:
 		return d.decodeMap(v)
@@ -246,7 +248,7 @@ func (d *Decoder) decodeString(v reflect.Value) error {
 		return d.newSyntaxError("unexpected string eof: %d < %d: %w", n, length, err)
 	}
 	d.offset += n
-	if v.Type() == byteSliceType {
+	if v.Kind() == reflect.Slice {
 		v.SetBytes(bytes)
 	} else {
 		v.SetString(string(bytes))
@@ -399,7 +401,6 @@ func (d *Decoder) decodeMap(v reflect.Value) error {
 var (
 	intType          = reflect.TypeFor[int]()
 	stringType       = reflect.TypeFor[string]()
-	byteSliceType    = reflect.TypeFor[[]byte]()
 	anySliceType     = reflect.TypeFor[[]any]()
 	mapStringAnyType = reflect.TypeFor[map[string]any]()
 )
