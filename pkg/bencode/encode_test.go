@@ -70,6 +70,27 @@ func TestEncoder_encodeString(t *testing.T) {
 	}
 }
 
+func TestEncoder_encodeBytes(t *testing.T) {
+	tests := []struct {
+		name string
+		s    []byte
+		want string
+	}{
+		{"0 length", []byte{}, "0:"},
+		{"1 char", []byte("a"), "1:a"},
+		{"ends in e", []byte("worde"), "5:worde"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			be := newStringEncoder()
+			be.e.encodeBytes(reflect.ValueOf(tt.s))
+			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Encoder.encodeBytes() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEncoder_encodeInt(t *testing.T) {
 	tests := []struct {
 		name string

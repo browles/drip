@@ -35,15 +35,6 @@ func (e *Encoder) Encode(v any) error {
 	return e.encode(reflect.ValueOf(v))
 }
 
-func (e *Encoder) WriteByte(c byte) error {
-	_, err := e.Write([]byte{c})
-	return err
-}
-
-func (e *Encoder) WriteString(s string) (n int, err error) {
-	return io.WriteString(e.Writer, s)
-}
-
 type UnsupportedTypeError struct {
 	Type reflect.Type
 }
@@ -56,11 +47,23 @@ type Marshaler interface {
 	MarshalBencoding() ([]byte, error)
 }
 
+func (e *Encoder) writeByte(c byte) error {
+	_, err := e.Write([]byte{c})
+	return err
+}
+
+func (e *Encoder) writeString(s string) (n int, err error) {
+	return io.WriteString(e.Writer, s)
+}
+
 var marshalerType = reflect.TypeFor[Marshaler]()
 
 func (e *Encoder) encode(v reflect.Value) error {
 	if v.Type().Implements(marshalerType) {
 		return e.encodeMarshaler(v)
+	}
+	if v.Type() == byteSliceType {
+		return e.encodeBytes(v)
 	}
 	switch v.Kind() {
 	case reflect.String:
@@ -100,13 +103,27 @@ func (e *Encoder) encodeMarshaler(v reflect.Value) error {
 
 func (e *Encoder) encodeString(v reflect.Value) error {
 	s := v.String()
-	if _, err := e.WriteString(strconv.Itoa(len(s))); err != nil {
+	if _, err := e.writeString(strconv.Itoa(len(s))); err != nil {
 		return err
 	}
-	if err := e.WriteByte(':'); err != nil {
+	if err := e.writeByte(':'); err != nil {
 		return err
 	}
-	if _, err := e.WriteString(s); err != nil {
+	if _, err := e.writeString(s); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (e *Encoder) encodeBytes(v reflect.Value) error {
+	b := v.Bytes()
+	if _, err := e.writeString(strconv.Itoa(len(b))); err != nil {
+		return err
+	}
+	if err := e.writeByte(':'); err != nil {
+		return err
+	}
+	if _, err := e.Write(b); err != nil {
 		return err
 	}
 	return nil
@@ -114,13 +131,13 @@ func (e *Encoder) encodeString(v reflect.Value) error {
 
 func (e *Encoder) encodeInt(v reflect.Value) error {
 	i := v.Int()
-	if err := e.WriteByte('i'); err != nil {
+	if err := e.writeByte('i'); err != nil {
 		return err
 	}
-	if _, err := e.WriteString(strconv.FormatInt(i, 10)); err != nil {
+	if _, err := e.writeString(strconv.FormatInt(i, 10)); err != nil {
 		return err
 	}
-	if err := e.WriteByte('e'); err != nil {
+	if err := e.writeByte('e'); err != nil {
 		return err
 	}
 	return nil
@@ -128,13 +145,13 @@ func (e *Encoder) encodeInt(v reflect.Value) error {
 
 func (e *Encoder) encodeUint(v reflect.Value) error {
 	i := v.Uint()
-	if err := e.WriteByte('i'); err != nil {
+	if err := e.writeByte('i'); err != nil {
 		return err
 	}
-	if _, err := e.WriteString(strconv.FormatUint(i, 10)); err != nil {
+	if _, err := e.writeString(strconv.FormatUint(i, 10)); err != nil {
 		return err
 	}
-	if err := e.WriteByte('e'); err != nil {
+	if err := e.writeByte('e'); err != nil {
 		return err
 	}
 	return nil
@@ -147,7 +164,7 @@ func (e *Encoder) encodeSlice(v reflect.Value) error {
 	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
 		return errors.New("bencode: maximum pointer depth exceeded")
 	}
-	if err := e.WriteByte('l'); err != nil {
+	if err := e.writeByte('l'); err != nil {
 		return err
 	}
 	for i := range v.Len() {
@@ -155,7 +172,7 @@ func (e *Encoder) encodeSlice(v reflect.Value) error {
 			return err
 		}
 	}
-	if err := e.WriteByte('e'); err != nil {
+	if err := e.writeByte('e'); err != nil {
 		return err
 	}
 	e.ptrDepth--
@@ -172,7 +189,7 @@ func (e *Encoder) encodeMap(v reflect.Value) error {
 	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
 		return errors.New("bencode: maximum pointer depth exceeded")
 	}
-	if err := e.WriteByte('d'); err != nil {
+	if err := e.writeByte('d'); err != nil {
 		return err
 	}
 	keys := v.MapKeys()
@@ -187,7 +204,7 @@ func (e *Encoder) encodeMap(v reflect.Value) error {
 			return err
 		}
 	}
-	if err := e.WriteByte('e'); err != nil {
+	if err := e.writeByte('e'); err != nil {
 		return err
 	}
 	e.ptrDepth--
@@ -328,7 +345,7 @@ func (e *Encoder) encodeStruct(v reflect.Value) error {
 	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
 		return errors.New("bencode: maximum pointer depth exceeded")
 	}
-	if err := e.WriteByte('d'); err != nil {
+	if err := e.writeByte('d'); err != nil {
 		return err
 	}
 	for _, f := range getFieldsForStruct(v).fields {
@@ -346,7 +363,7 @@ func (e *Encoder) encodeStruct(v reflect.Value) error {
 			return err
 		}
 	}
-	if err := e.WriteByte('e'); err != nil {
+	if err := e.writeByte('e'); err != nil {
 		return err
 	}
 	e.ptrDepth--

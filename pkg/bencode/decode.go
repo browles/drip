@@ -47,11 +47,10 @@ func (d *Decoder) newSyntaxError(t string, args ...any) error {
 var unmarshalerType = reflect.TypeFor[Unmarshaler]()
 
 func (d *Decoder) decode(v reflect.Value) error {
-	t := v.Type()
-	if t.Implements(unmarshalerType) {
+	if v.Type().Implements(unmarshalerType) {
 		return d.decodeUnmarshaler(v)
 	}
-	if t == byteSliceType {
+	if v.Type() == byteSliceType {
 		return d.decodeString(v)
 	}
 	switch v.Kind() {
@@ -72,7 +71,7 @@ func (d *Decoder) decode(v reflect.Value) error {
 	case reflect.Pointer:
 		return d.decode(v.Elem())
 	default:
-		return &UnsupportedTypeError{t}
+		return &UnsupportedTypeError{v.Type()}
 	}
 }
 
@@ -364,13 +363,13 @@ func (d *Decoder) decodeMap(v reflect.Value) error {
 	d.offset += 1
 	t := v.Type()
 	kt := t.Key()
+	et := t.Elem()
 	if kt.Kind() != reflect.String {
 		return &UnsupportedTypeError{t}
 	}
 	if v.IsNil() {
 		v.Set(reflect.MakeMap(t))
 	}
-	et := t.Elem()
 	for {
 		c, err := d.ReadByte()
 		if err != nil {
