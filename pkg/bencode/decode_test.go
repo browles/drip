@@ -8,7 +8,7 @@ import (
 )
 
 func newStringDecoder(s string) *Decoder {
-	return &Decoder{*bufio.NewReader(strings.NewReader(s))}
+	return &Decoder{Reader: bufio.NewReader(strings.NewReader(s))}
 }
 
 func new[T any]() reflect.Value {
