@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 func Marshal(v any) ([]byte, error) {
@@ -208,10 +209,22 @@ type field struct {
 	field   reflect.StructField
 }
 
+var (
+	fieldCacheMu sync.Mutex
+	fieldCache   = make(map[reflect.Type]*fieldInfo)
+)
+
 func getFieldsForStruct(v reflect.Value) *fieldInfo {
+	t := v.Type()
+	fieldCacheMu.Lock()
+	if fi, ok := fieldCache[t]; ok {
+		fieldCacheMu.Unlock()
+		return fi
+	}
+	fieldCacheMu.Unlock()
 	keyToField := make(map[string]*field)
 	visited := make(map[reflect.Type]struct{})
-	curr, next := []*field{}, []*field{{typ: v.Type()}}
+	curr, next := []*field{}, []*field{{typ: t}}
 	for len(next) > 0 {
 		curr, next = next, curr[:0]
 		for _, structField := range curr {
@@ -292,10 +305,14 @@ func getFieldsForStruct(v reflect.Value) *fieldInfo {
 	slices.SortFunc(fields, func(a, b *field) int {
 		return strings.Compare(a.key, b.key)
 	})
-	return &fieldInfo{
+	fi := &fieldInfo{
 		fields:     fields,
 		keyToField: keyToField,
 	}
+	fieldCacheMu.Lock()
+	fieldCache[t] = fi
+	fieldCacheMu.Unlock()
+	return fi
 }
 
 func isNil(v reflect.Value) bool {
