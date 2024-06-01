@@ -47,8 +47,12 @@ func (d *Decoder) newSyntaxError(t string, args ...any) error {
 var unmarshalerType = reflect.TypeFor[Unmarshaler]()
 
 func (d *Decoder) decode(v reflect.Value) error {
-	if v.Type().Implements(unmarshalerType) {
+	t := v.Type()
+	if t.Implements(unmarshalerType) {
 		return d.decodeUnmarshaler(v)
+	}
+	if t == byteSliceType {
+		return d.decodeString(v)
 	}
 	switch v.Kind() {
 	case reflect.String:
@@ -57,7 +61,7 @@ func (d *Decoder) decode(v reflect.Value) error {
 		return d.decodeInt(v)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return d.decodeUint(v)
-	case reflect.Slice:
+	case reflect.Slice, reflect.Array:
 		return d.decodeSlice(v)
 	case reflect.Map:
 		return d.decodeMap(v)
@@ -68,7 +72,7 @@ func (d *Decoder) decode(v reflect.Value) error {
 	case reflect.Pointer:
 		return d.decode(v.Elem())
 	default:
-		return &UnsupportedTypeError{v.Type()}
+		return &UnsupportedTypeError{t}
 	}
 }
 
@@ -243,7 +247,11 @@ func (d *Decoder) decodeString(v reflect.Value) error {
 		return d.newSyntaxError("unexpected string eof: %d < %d: %w", n, length, err)
 	}
 	d.offset += n
-	v.SetString(string(bytes))
+	if v.Type() == byteSliceType {
+		v.SetBytes(bytes)
+	} else {
+		v.SetString(string(bytes))
+	}
 	return nil
 }
 
@@ -300,9 +308,8 @@ func (d *Decoder) decodeSlice(v reflect.Value) error {
 		return d.newSyntaxError("unexpected list prefix: %c", b)
 	}
 	d.offset += 1
-	t := v.Type()
-	if v.IsNil() {
-		v.Set(reflect.MakeSlice(t, 0, 0))
+	if v.Kind() == reflect.Slice && v.IsNil() {
+		v.Set(reflect.MakeSlice(v.Type(), 0, 0))
 	}
 	i := 0
 	for {
@@ -316,19 +323,29 @@ func (d *Decoder) decodeSlice(v reflect.Value) error {
 		if err := d.UnreadByte(); err != nil {
 			return err
 		}
-		if i >= v.Cap() {
-			if v.Len() > 0 {
-				v.Grow(v.Len())
-			} else {
-				v.Grow(1)
+		if v.Kind() == reflect.Slice {
+			if i >= v.Cap() {
+				if v.Len() > 0 {
+					v.Grow(v.Len())
+				} else {
+					v.Grow(1)
+				}
+			}
+			if i >= v.Len() {
+				v.SetLen(i + 1)
 			}
 		}
-		if i >= v.Len() {
-			v.SetLen(i + 1)
-		}
-		// Pass the pointer to check for a unmarshaler with a pointer receiver.
-		if err := d.decode(v.Index(i).Addr()); err != nil {
-			return err
+		if i < v.Len() {
+			// Check length for arrays. This check is guaranteed for slices.
+			// Pass the pointer to check for a unmarshaler with a pointer receiver.
+			if err := d.decode(v.Index(i).Addr()); err != nil {
+				return err
+			}
+		} else {
+			// Toss the remainder.
+			if err := d.consume(nil); err != nil {
+				return err
+			}
 		}
 		i++
 	}
@@ -348,7 +365,7 @@ func (d *Decoder) decodeMap(v reflect.Value) error {
 	t := v.Type()
 	kt := t.Key()
 	if kt.Kind() != reflect.String {
-		return &UnsupportedTypeError{v.Type()}
+		return &UnsupportedTypeError{t}
 	}
 	if v.IsNil() {
 		v.Set(reflect.MakeMap(t))
@@ -383,6 +400,7 @@ func (d *Decoder) decodeMap(v reflect.Value) error {
 var (
 	intType          = reflect.TypeFor[int]()
 	stringType       = reflect.TypeFor[string]()
+	byteSliceType    = reflect.TypeFor[[]byte]()
 	anySliceType     = reflect.TypeFor[[]any]()
 	mapStringAnyType = reflect.TypeFor[map[string]any]()
 )
@@ -445,7 +463,6 @@ func (d *Decoder) decodeInterface(v reflect.Value) error {
 		// Can only decode into an any.
 		return &UnsupportedTypeError{v.Type()}
 	}
-
 	b, err := d.ReadByte()
 	if err != nil {
 		return err

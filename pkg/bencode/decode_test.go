@@ -123,6 +123,7 @@ func TestDecoder_decodeString(t *testing.T) {
 	}{
 		{"0 length", new[string](), "0:", "", false},
 		{"1 char", new[string](), "1:a", "a", false},
+		{"byte slice", new[[]byte](), "3:abc", []byte{'a', 'b', 'c'}, false},
 		{"ends in e", new[string](), "5:worde", "worde", false},
 		{"malformed length", new[string](), "5e:word", "", true},
 		{"incorrect length", new[string](), "5:word", "", true},
@@ -135,7 +136,7 @@ func TestDecoder_decodeString(t *testing.T) {
 				t.Errorf("Decoder.decodeString() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if got := reflect.Indirect(tt.v).Interface(); got != tt.want {
+			if got := reflect.Indirect(tt.v).Interface(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Decoder.decodeString() = %v, want %v", got, tt.want)
 			}
 		})
@@ -213,6 +214,7 @@ func TestDecoder_decodeSlice(t *testing.T) {
 	}{
 		{"empty list", new[[]any](), "le", []any{}, false},
 		{"one item", new[[]int64](), "li123ee", []int64{123}, false},
+		{"array", new[[3]int64](), "li1ei2ei3ei4ei5ee", [3]int64{1, 2, 3}, false},
 		{"nested list", new[[][]int](), "lli1ei2eee", [][]int{{1, 2}}, false},
 		{
 			"mixed type",
