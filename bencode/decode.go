@@ -12,7 +12,8 @@ import (
 )
 
 func Unmarshal(b []byte, v any) error {
-	d := NewDecoder(bytes.NewReader(b))
+	r := bytes.NewReader(b)
+	d := NewDecoder(bufio.NewReaderSize(r, 32))
 	return d.Decode(v)
 }
 
@@ -22,6 +23,9 @@ type Decoder struct {
 }
 
 func NewDecoder(r io.Reader) *Decoder {
+	if br, ok := r.(*bufio.Reader); ok {
+		return &Decoder{Reader: br}
+	}
 	return &Decoder{Reader: bufio.NewReader(r)}
 }
 
@@ -485,7 +489,7 @@ func (d *Decoder) decodeInterface(v reflect.Value) error {
 			return d.newSyntaxError("unexpected prefix: %c", b)
 		}
 	}
-	if err := d.decode(iv); err != nil {
+	if err := d.decode(iv.Elem()); err != nil {
 		return err
 	}
 	v.Set(iv.Elem())
