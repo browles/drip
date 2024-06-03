@@ -316,6 +316,15 @@ func TestEncoder_encodeStruct(t *testing.T) {
 			"",
 			true,
 		},
+		{
+			"omitempty",
+			struct {
+				A int
+				B int `bencode:",omitempty"`
+			}{A: 1, B: 0},
+			"d1:ai1ee",
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

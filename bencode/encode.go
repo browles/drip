@@ -27,8 +27,8 @@ type Encoder struct {
 
 const ptrDepthLimit = 1000
 
-func NewEncoder(w io.Writer) Encoder {
-	return Encoder{Writer: w}
+func NewEncoder(w io.Writer) *Encoder {
+	return &Encoder{Writer: w}
 }
 
 func (e *Encoder) Encode(v any) error {
@@ -217,19 +217,34 @@ type fieldInfo struct {
 }
 
 type field struct {
-	ignored bool
-	index   []int
-	name    string
-	tag     string
-	key     string
-	typ     reflect.Type
-	field   reflect.StructField
+	ignored   bool
+	index     []int
+	name      string
+	tag       string
+	key       string
+	omitempty bool
+	typ       reflect.Type
+	field     reflect.StructField
 }
 
 var (
 	fieldCacheMu sync.Mutex
 	fieldCache   = make(map[reflect.Type]*fieldInfo)
 )
+
+func parseTag(tag string) (string, bool) {
+	name, rest, _ := strings.Cut(tag, ",")
+	omitempty := false
+	var opt string
+	for rest != "" {
+		opt, rest, _ = strings.Cut(rest, ",")
+		if opt == "omitempty" {
+			omitempty = true
+			break
+		}
+	}
+	return name, omitempty
+}
 
 func getFieldsForStruct(v reflect.Value) *fieldInfo {
 	t := v.Type()
@@ -265,7 +280,7 @@ func getFieldsForStruct(v reflect.Value) *fieldInfo {
 				} else if !sf.IsExported() {
 					continue
 				}
-				tag := sf.Tag.Get("bencode")
+				tag, omitempty := parseTag(sf.Tag.Get("bencode"))
 				if tag == "-" {
 					continue
 				}
@@ -279,12 +294,13 @@ func getFieldsForStruct(v reflect.Value) *fieldInfo {
 					key = name
 				}
 				f := &field{
-					index: index,
-					name:  name,
-					tag:   tag,
-					key:   key,
-					typ:   sf.Type,
-					field: sf,
+					index:     index,
+					name:      name,
+					tag:       tag,
+					key:       key,
+					omitempty: omitempty,
+					typ:       sf.Type,
+					field:     sf,
 				}
 				if tag == "" && sf.Anonymous && ft.Kind() == reflect.Struct {
 					next = append(next, f)
@@ -341,6 +357,19 @@ func isNil(v reflect.Value) bool {
 	}
 }
 
+func isEmptyValue(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
+		return v.Len() == 0
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Interface, reflect.Pointer:
+		return v.IsZero()
+	}
+	return false
+}
+
 func (e *Encoder) encodeStruct(v reflect.Value) error {
 	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
 		return errors.New("bencode: maximum pointer depth exceeded")
@@ -351,6 +380,9 @@ func (e *Encoder) encodeStruct(v reflect.Value) error {
 	for _, f := range getFieldsForStruct(v).fields {
 		fv := v.FieldByIndex(f.index)
 		if isNil(fv) {
+			continue
+		}
+		if f.omitempty && isEmptyValue(fv) {
 			continue
 		}
 		if fv.Kind() == reflect.Pointer {
