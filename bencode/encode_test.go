@@ -188,7 +188,7 @@ func TestEncoder_encodeStruct(t *testing.T) {
 		Nested *simple
 	}
 	type simpleEmbedded struct {
-		simple
+		*simple
 		A, Y, Z int
 	}
 	type deeplyEmbedded struct {
@@ -255,7 +255,7 @@ func TestEncoder_encodeStruct(t *testing.T) {
 		{
 			"embedded struct",
 			simpleEmbedded{
-				simple: simple{X: 1, Y: 2, z: 3},
+				simple: &simple{X: 1, Y: 2, z: 3},
 				A:      22,
 				Y:      33,
 				Z:      44,
@@ -264,10 +264,22 @@ func TestEncoder_encodeStruct(t *testing.T) {
 			false,
 		},
 		{
+			"nil embedded struct",
+			simpleEmbedded{
+				simple: nil,
+				A:      22,
+				Y:      33,
+				Z:      44,
+			},
+			"d1:ai22e1:yi33e1:zi44ee",
+			false,
+		},
+
+		{
 			"deeply embedded struct",
 			deeplyEmbedded{
 				simpleEmbedded: simpleEmbedded{
-					simple: simple{X: 1, Y: 2, z: 3},
+					simple: &simple{X: 1, Y: 2, z: 3},
 					A:      22,
 					Y:      33,
 					Z:      44,
@@ -282,7 +294,7 @@ func TestEncoder_encodeStruct(t *testing.T) {
 			conflictingEmbedded{
 				A: 11,
 				simpleEmbedded: simpleEmbedded{
-					simple: simple{X: 1, Y: 2, z: 3},
+					simple: &simple{X: 1, Y: 2, z: 3},
 					A:      22,
 					Y:      33,
 					Z:      44,

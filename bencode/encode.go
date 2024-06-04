@@ -59,6 +59,9 @@ func (e *Encoder) writeString(s string) (n int, err error) {
 var marshalerType = reflect.TypeFor[Marshaler]()
 
 func (e *Encoder) encode(v reflect.Value) error {
+	if v.Kind() != reflect.Pointer && reflect.PointerTo(v.Type()).Implements(marshalerType) && v.CanAddr() {
+		return e.encodeMarshaler(v.Addr())
+	}
 	if v.Type().Implements(marshalerType) {
 		return e.encodeMarshaler(v)
 	}
@@ -73,6 +76,8 @@ func (e *Encoder) encode(v reflect.Value) error {
 		if v.Type().Elem().Kind() == reflect.Uint8 {
 			return e.encodeBytes(v)
 		}
+		return e.encodeSlice(v)
+	case reflect.Array:
 		return e.encodeSlice(v)
 	case reflect.Map:
 		return e.encodeMap(v)
@@ -158,7 +163,7 @@ func (e *Encoder) encodeUint(v reflect.Value) error {
 }
 
 func (e *Encoder) encodeSlice(v reflect.Value) error {
-	if v.IsNil() {
+	if v.Kind() == reflect.Slice && v.IsNil() {
 		return nil
 	}
 	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
@@ -261,6 +266,9 @@ func getFieldsForStruct(v reflect.Value) *fieldInfo {
 		curr, next = next, curr[:0]
 		for _, structField := range curr {
 			t := structField.typ
+			if t.Kind() == reflect.Pointer {
+				t = t.Elem()
+			}
 			if _, ok := visited[t]; ok {
 				continue
 			}
@@ -280,29 +288,30 @@ func getFieldsForStruct(v reflect.Value) *fieldInfo {
 				} else if !sf.IsExported() {
 					continue
 				}
-				tag, omitempty := parseTag(sf.Tag.Get("bencode"))
+				tag := sf.Tag.Get("bencode")
 				if tag == "-" {
 					continue
 				}
-				tag = strings.ToLower(tag)
+				tagName, omitempty := parseTag(tag)
+				tagName = strings.ToLower(tagName)
 				name := strings.ToLower(sf.Name)
 				index := make([]int, len(structField.index)+1)
 				copy(index, structField.index)
 				index[len(index)-1] = j
-				key := tag
+				key := tagName
 				if key == "" {
 					key = name
 				}
 				f := &field{
 					index:     index,
 					name:      name,
-					tag:       tag,
+					tag:       tagName,
 					key:       key,
 					omitempty: omitempty,
 					typ:       sf.Type,
 					field:     sf,
 				}
-				if tag == "" && sf.Anonymous && ft.Kind() == reflect.Struct {
+				if tagName == "" && sf.Anonymous && ft.Kind() == reflect.Struct {
 					next = append(next, f)
 				} else {
 					if ef, ok := keyToField[key]; ok {
@@ -370,6 +379,20 @@ func isEmptyValue(v reflect.Value) bool {
 	return false
 }
 
+func fieldByIndex(v reflect.Value, index []int) reflect.Value {
+	fv := v
+	for _, i := range index {
+		if isNil(fv) {
+			break
+		}
+		if fv.Kind() == reflect.Pointer {
+			fv = fv.Elem()
+		}
+		fv = fv.Field(i)
+	}
+	return fv
+}
+
 func (e *Encoder) encodeStruct(v reflect.Value) error {
 	if e.ptrDepth++; e.ptrDepth > ptrDepthLimit {
 		return errors.New("bencode: maximum pointer depth exceeded")
@@ -378,15 +401,12 @@ func (e *Encoder) encodeStruct(v reflect.Value) error {
 		return err
 	}
 	for _, f := range getFieldsForStruct(v).fields {
-		fv := v.FieldByIndex(f.index)
+		fv := fieldByIndex(v, f.index)
 		if isNil(fv) {
 			continue
 		}
 		if f.omitempty && isEmptyValue(fv) {
 			continue
-		}
-		if fv.Kind() == reflect.Pointer {
-			fv = fv.Elem()
 		}
 		if err := e.encodeString(reflect.ValueOf(f.key)); err != nil {
 			return err

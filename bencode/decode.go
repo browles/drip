@@ -51,6 +51,9 @@ func (d *Decoder) newSyntaxError(t string, args ...any) error {
 var unmarshalerType = reflect.TypeFor[Unmarshaler]()
 
 func (d *Decoder) decode(v reflect.Value) error {
+	if v.Kind() != reflect.Pointer && reflect.PointerTo(v.Type()).Implements(unmarshalerType) && v.CanAddr() {
+		return d.decodeUnmarshaler(v.Addr())
+	}
 	if v.Type().Implements(unmarshalerType) {
 		return d.decodeUnmarshaler(v)
 	}
@@ -342,8 +345,7 @@ func (d *Decoder) decodeSlice(v reflect.Value) error {
 		}
 		if i < v.Len() {
 			// Check length for arrays. This check is guaranteed for slices.
-			// Pass the pointer to check for a unmarshaler with a pointer receiver.
-			if err := d.decode(v.Index(i).Addr()); err != nil {
+			if err := d.decode(v.Index(i)); err != nil {
 				return err
 			}
 		} else {
@@ -451,8 +453,7 @@ func (d *Decoder) decodeStruct(v reflect.Value) error {
 				elem = elem.Elem()
 			}
 		}
-		// Pass the pointer to check for a unmarshaler with a pointer receiver.
-		if err := d.decode(elem.Addr()); err != nil {
+		if err := d.decode(elem); err != nil {
 			return err
 		}
 	}
