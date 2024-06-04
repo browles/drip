@@ -5,17 +5,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/browles/gotorrent/pkg/bencode"
+	"github.com/browles/gotorrent/bencode"
 )
 
 type Metainfo struct {
 	Info         *InfoDictionary `bencode:"info"`
 	Announce     string          `bencode:"announce"`
-	AnnounceList [][]string      `bencode:"announce-list"`
-	CreationDate Time            `bencode:"creation date"`
-	Comment      string          `bencode:"comment"`
-	CreatedBy    string          `bencode:"created by"`
-	Encoding     string          `bencode:"encoding"`
+	AnnounceList [][]string      `bencode:"announce-list,omitempty"`
+	CreationDate Time            `bencode:"creation date,omitempty"`
+	Comment      string          `bencode:"comment,omitempty"`
+	CreatedBy    string          `bencode:"created by,omitempty"`
+	Encoding     string          `bencode:"encoding,omitempty"`
 }
 
 type Time struct {
@@ -36,41 +36,43 @@ func (t *Time) UnmarshalBencoding(data []byte) error {
 }
 
 type InfoDictionary struct {
-	PieceLength int       `bencode:"piece length"`
-	Pieces      SHA1Slice `bencode:"pieces"`
-	Private     int       `bencode:"private"`
+	PieceLength int    `bencode:"piece length"`
+	Pieces      Pieces `bencode:"pieces"`
+	Private     int    `bencode:"private,omitempty"`
 	// Advisory filename or directory, depending on the mode
 	Name string `bencode:"name"`
 	// Single file mode
 	Length int    `bencode:"length"`
-	MD5Sum string `bencode:"md5sum"`
+	MD5Sum string `bencode:"md5sum,omitempty"`
 	// Multi file mode
-	Files []*File `bencode:"files"`
+	Files []*File `bencode:"files,omitempty"`
 }
 
-type SHA1Slice []string
+type Pieces [][20]byte
 
-func (s *SHA1Slice) MarshalBencoding() ([]byte, error) {
+func (p *Pieces) MarshalBencoding() ([]byte, error) {
 	var sb strings.Builder
-	for _, hash := range *s {
-		sb.Write([]byte(hash))
+	for _, hash := range *p {
+		sb.Write(hash[:])
 	}
 	return bencode.Marshal(sb.String())
 }
 
-func (s *SHA1Slice) UnmarshalBencoding(data []byte) error {
-	var concat string
+func (p *Pieces) UnmarshalBencoding(data []byte) error {
+	var concat []byte
 	if err := bencode.Unmarshal(data, &concat); err != nil {
 		return err
 	}
 	if len(concat)%20 != 0 {
 		return fmt.Errorf("cannot unmarshal pieces string, len() not multiple of 20: %d", len(concat))
 	}
-	var res []string
-	for i := 0; i+20 <= len(concat); i += 20 {
-		res = append(res, concat[i:i+20])
+	var res [][20]byte
+	for i := 0; i < len(concat); i += 20 {
+		var a [20]byte
+		copy(a[:], concat[i:i+20])
+		res = append(res, a)
 	}
-	*s = SHA1Slice(res)
+	*p = Pieces(res)
 	return nil
 }
 
@@ -80,6 +82,6 @@ type Files struct {
 
 type File struct {
 	Length int      `bencode:"length"`
-	MD5Sum string   `bencode:"md5sum"`
+	MD5Sum string   `bencode:"md5sum,omitempty"`
 	Path   []string `bencode:"path"`
 }
