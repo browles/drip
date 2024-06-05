@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"reflect"
 	"strconv"
 
 	"github.com/browles/drip/bencode"
@@ -110,13 +109,13 @@ func (p *Peers) UnmarshalBencoding(data []byte) error {
 	if err != nil {
 		return err
 	}
-	rv := reflect.ValueOf(v).Elem()
-	if rv.Kind() == reflect.String {
+	switch v := v.(type) {
+	case string:
 		p.Compact = true
-		p.List, err = parseCompactPeers(v.(string))
-	} else if rv.Kind() == reflect.Slice {
-		p.List, err = parsePeers(v.([]map[string]any))
-	} else {
+		p.List, err = parseCompactPeers(v)
+	case []map[string]any:
+		p.List, err = parsePeers(v)
+	default:
 		return errors.New("unknown peers format")
 	}
 	return err

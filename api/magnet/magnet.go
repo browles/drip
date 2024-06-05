@@ -28,8 +28,7 @@ func ParseMagnetURL(link string) (*Magnet, error) {
 	}
 	xl := query.Get("xl")
 	if xl != "" {
-		ma.Length, err = strconv.Atoi(xl)
-		if err != nil {
+		if ma.Length, err = strconv.Atoi(xl); err != nil {
 			return nil, err
 		}
 	}

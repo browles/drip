@@ -10,47 +10,13 @@ import (
 )
 
 type Metainfo struct {
-	InfoBytes    bencode.RawMessage `bencode:"info"`
-	Info         *Info              `bencode:"-"`
-	Announce     string             `bencode:"announce"`
-	AnnounceList [][]string         `bencode:"announce-list,omitempty"`
-	CreationDate *Time              `bencode:"creation date,omitempty"`
-	Comment      string             `bencode:"comment,omitempty"`
-	CreatedBy    string             `bencode:"created by,omitempty"`
-	Encoding     string             `bencode:"encoding,omitempty"`
-}
-
-func (mu *Metainfo) Marshal() ([]byte, error) {
-	if err := mu.MarshalInfo(); err != nil {
-		return nil, err
-	}
-	return bencode.Marshal(mu)
-}
-
-func (mu *Metainfo) MarshalInfo() error {
-	if len(mu.InfoBytes) > 0 {
-		return nil
-	}
-	var err error
-	mu.InfoBytes, err = bencode.Marshal(mu.Info)
-	return err
-}
-
-func (mu *Metainfo) Unmarshal(data []byte) error {
-	if err := bencode.Unmarshal(data, mu); err != nil {
-		return err
-	}
-	return mu.UnmarshalInfo()
-}
-
-func (mu *Metainfo) UnmarshalInfo() error {
-	mu.Info = &Info{}
-	err := bencode.Unmarshal(mu.InfoBytes, mu.Info)
-	if err != nil {
-		return err
-	}
-	mu.Info.SHA1 = sha1.Sum(mu.InfoBytes)
-	return nil
+	Info         *Info      `bencode:"info"`
+	Announce     string     `bencode:"announce"`
+	AnnounceList [][]string `bencode:"announce-list,omitempty"`
+	CreationDate *Time      `bencode:"creation date,omitempty"`
+	Comment      string     `bencode:"comment,omitempty"`
+	CreatedBy    string     `bencode:"created by,omitempty"`
+	Encoding     string     `bencode:"encoding,omitempty"`
 }
 
 type Time struct {
@@ -82,6 +48,18 @@ type Info struct {
 	MD5Sum string `bencode:"md5sum,omitempty"`
 	// Multi file mode
 	Files []*File `bencode:"files,omitempty"`
+}
+
+type info Info
+
+func (i *Info) UnmarshalBencoding(data []byte) error {
+	cpy := &info{}
+	if err := bencode.Unmarshal(data, cpy); err != nil {
+		return err
+	}
+	*i = Info(*cpy)
+	i.SHA1 = sha1.Sum(data)
+	return nil
 }
 
 type Pieces [][20]byte
