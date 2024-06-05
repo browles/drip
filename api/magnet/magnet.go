@@ -1,4 +1,4 @@
-package api
+package magnet
 
 import (
 	"net/url"

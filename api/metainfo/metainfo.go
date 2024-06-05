@@ -1,4 +1,4 @@
-package api
+package metainfo
 
 import (
 	"crypto/sha1"

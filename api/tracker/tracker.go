@@ -1,4 +1,4 @@
-package api
+package tracker
 
 import (
 	"encoding/binary"
@@ -12,7 +12,7 @@ import (
 	"github.com/browles/drip/bencode"
 )
 
-type TrackerRequest struct {
+type Request struct {
 	Announce   string
 	InfoHash   [20]byte
 	PeerID     string
@@ -25,7 +25,7 @@ type TrackerRequest struct {
 	// more?
 }
 
-func (t *TrackerRequest) URL() *url.URL {
+func (t *Request) URL() *url.URL {
 	params := make(url.Values)
 	for k, v := range map[string]string{
 		// http://bittorrent.org/beps/bep_0003.html
@@ -57,7 +57,7 @@ func (t *TrackerRequest) URL() *url.URL {
 	return url
 }
 
-type TrackerResponse struct {
+type Response struct {
 	// http://bittorrent.org/beps/bep_0003.html
 	FailureReason string `bencode:"failure reason,omitempty"`
 	Interval      int    `bencode:"interval"`
