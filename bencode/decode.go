@@ -8,7 +8,6 @@ import (
 	"io"
 	"reflect"
 	"strconv"
-	"unicode"
 )
 
 func Unmarshal(b []byte, v any) error {
@@ -96,6 +95,10 @@ func (d *Decoder) decodeUnmarshaler(v reflect.Value) error {
 	return m.UnmarshalBencoding(b.Bytes())
 }
 
+func isDigit(b byte) bool {
+	return '0' <= b && b <= '9'
+}
+
 func (d *Decoder) consume(buf *bytes.Buffer) error {
 	b, err := d.ReadByte()
 	if err != nil {
@@ -112,7 +115,7 @@ func (d *Decoder) consume(buf *bytes.Buffer) error {
 	case 'd':
 		return d.consumeDictionary(buf)
 	default:
-		if unicode.IsDigit(rune(b)) {
+		if isDigit(b) {
 			return d.consumeString(buf)
 		}
 		return d.newSyntaxError("unexpected prefix: %c", b)
@@ -124,11 +127,12 @@ func (d *Decoder) consumeString(buf *bytes.Buffer) error {
 	if err != nil {
 		return d.newSyntaxError("unterminated string prefix: %w", err)
 	}
-	length, err := strconv.Atoi(lengthStr[:len(lengthStr)-1])
+	lengthStr = lengthStr[:len(lengthStr)-1]
+	length, err := strconv.Atoi(lengthStr)
 	if err != nil {
 		return d.newSyntaxError("Atoi: %w", err)
 	}
-	d.offset += len(lengthStr)
+	d.offset += len(lengthStr) + 1
 	bytes := make([]byte, length)
 	n, err := io.ReadFull(d, bytes)
 	if err != nil {
@@ -136,7 +140,8 @@ func (d *Decoder) consumeString(buf *bytes.Buffer) error {
 	}
 	d.offset += n
 	if buf != nil {
-		buf.Write([]byte(lengthStr)) // lengthStr is already terminated with :
+		buf.Write([]byte(lengthStr))
+		buf.WriteByte(':')
 		buf.Write(bytes)
 	}
 	return nil
@@ -155,14 +160,19 @@ func (d *Decoder) consumeInt(buf *bytes.Buffer) error {
 	if err != nil {
 		return d.newSyntaxError("unterminated int: %w", err)
 	}
-	_, err = strconv.ParseInt(intStr[:len(intStr)-1], 10, 64)
+	intStr = intStr[:len(intStr)-1]
+	if leadingZero(intStr) {
+		return d.newSyntaxError("invalid int: %s", intStr)
+	}
+	_, err = strconv.ParseInt(intStr, 10, 64)
 	if err != nil {
 		return d.newSyntaxError("ParseInt: %w", err)
 	}
-	d.offset += len(intStr)
+	d.offset += len(intStr) + 1
 	if buf != nil {
 		buf.WriteByte('i')
-		buf.Write([]byte(intStr)) // intStr is already terminated with e
+		buf.Write([]byte(intStr))
+		buf.WriteByte('e')
 	}
 	return nil
 }
@@ -263,6 +273,19 @@ func (d *Decoder) decodeString(v reflect.Value) error {
 	return nil
 }
 
+func leadingZero(intStr string) bool {
+	if len(intStr) == 0 {
+		return false
+	}
+	if intStr[0] == '0' {
+		return len(intStr) > 1
+	}
+	if intStr[0] == '-' && len(intStr) >= 2 {
+		return intStr[1] == '0'
+	}
+	return false
+}
+
 func (d *Decoder) decodeInt(v reflect.Value) error {
 	b, err := d.ReadByte()
 	if err != nil {
@@ -276,11 +299,15 @@ func (d *Decoder) decodeInt(v reflect.Value) error {
 	if err != nil {
 		return d.newSyntaxError("unterminated int: %w", err)
 	}
-	i, err := strconv.ParseInt(intStr[:len(intStr)-1], 10, 64)
+	intStr = intStr[:len(intStr)-1]
+	if leadingZero(intStr) {
+		return d.newSyntaxError("invalid int: %s", intStr)
+	}
+	i, err := strconv.ParseInt(intStr, 10, 64)
 	if err != nil {
 		return d.newSyntaxError("ParseInt: %w", err)
 	}
-	d.offset += len(intStr)
+	d.offset += len(intStr) + 1
 	v.SetInt(i)
 	return nil
 }
@@ -298,11 +325,15 @@ func (d *Decoder) decodeUint(v reflect.Value) error {
 	if err != nil {
 		return d.newSyntaxError("unterminated int: %w", err)
 	}
-	i, err := strconv.ParseUint(intStr[:len(intStr)-1], 10, 64)
+	intStr = intStr[:len(intStr)-1]
+	if leadingZero(intStr) {
+		return d.newSyntaxError("invalid int: %s", intStr)
+	}
+	i, err := strconv.ParseUint(intStr, 10, 64)
 	if err != nil {
 		return d.newSyntaxError("ParseUint: %w", err)
 	}
-	d.offset += len(intStr)
+	d.offset += len(intStr) + 1
 	v.SetUint(i)
 	return nil
 }
@@ -484,7 +515,7 @@ func (d *Decoder) decodeInterface(v reflect.Value) error {
 	case 'd':
 		iv = reflect.New(mapStringAnyType)
 	default:
-		if unicode.IsDigit(rune(b)) {
+		if isDigit(b) {
 			iv = reflect.New(stringType)
 		} else {
 			return d.newSyntaxError("unexpected prefix: %c", b)

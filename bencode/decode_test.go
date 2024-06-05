@@ -154,10 +154,13 @@ func TestDecoder_decodeInt(t *testing.T) {
 		{"positive", new[int64](), "i123e", int64(123), false},
 		{"negative", new[int32](), "i-456e", int32(-456), false},
 		{"zero", new[int](), "i0e", 0, false},
-		{"malformed number", new[int](), "i12j23e", int(0), true},
-		{"double signed number", new[int](), "i--123e", int(0), true},
-		{"noninitiated number", new[int](), "123e", int(0), true},
-		{"nonterminated number", new[int](), "i123", int(0), true},
+		{"negative zero", new[int](), "i-0e", 0, true},
+		{"leading zero", new[int](), "i0123e", 0, true},
+		{"negative leading zero", new[int](), "i-0123e", 0, true},
+		{"malformed number", new[int](), "i12j23e", 0, true},
+		{"double signed number", new[int](), "i--123e", 0, true},
+		{"noninitiated number", new[int](), "123e", 0, true},
+		{"nonterminated number", new[int](), "i123", 0, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
