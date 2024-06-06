@@ -3,6 +3,7 @@ package bencode
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"slices"
@@ -100,7 +101,7 @@ func (e *Encoder) encodeMarshaler(v reflect.Value) error {
 	}
 	b, err := m.MarshalBencoding()
 	if err != nil {
-		return err
+		return fmt.Errorf("encodeMarshaler: %w", err)
 	}
 	_, err = e.Write(b)
 	return err

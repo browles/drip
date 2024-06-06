@@ -90,7 +90,7 @@ func (d *Decoder) decodeUnmarshaler(v reflect.Value) error {
 	}
 	var b bytes.Buffer
 	if err := d.consume(&b); err != nil {
-		return err
+		return fmt.Errorf("decodeUnmarshaler error at offset %d: %w", d.offset, err)
 	}
 	return m.UnmarshalBencoding(b.Bytes())
 }
@@ -119,25 +119,25 @@ func (d *Decoder) consume(buf *bytes.Buffer) error {
 			_, err := d.consumeString(buf)
 			return err
 		}
-		return d.newSyntaxError("unexpected prefix: %c", b)
+		return d.newSyntaxError("consume: unexpected prefix: %c", b)
 	}
 }
 
 func (d *Decoder) consumeString(buf *bytes.Buffer) (string, error) {
 	lengthStr, err := d.ReadString(':')
 	if err != nil {
-		return "", d.newSyntaxError("unterminated string prefix: %w", err)
+		return "", d.newSyntaxError("consumeString: unterminated string prefix: %w", err)
 	}
 	lengthStr = lengthStr[:len(lengthStr)-1]
 	length, err := strconv.Atoi(lengthStr)
 	if err != nil {
-		return "", d.newSyntaxError("Atoi: %w", err)
+		return "", d.newSyntaxError("consumeString: %w", err)
 	}
 	d.offset += len(lengthStr) + 1
 	bytes := make([]byte, length)
 	n, err := io.ReadFull(d, bytes)
 	if err != nil {
-		return "", d.newSyntaxError("unexpected string eof: %d < %d: %w", n, length, err)
+		return "", d.newSyntaxError("consumeString: unexpected string eof: %d < %d: %w", n, length, err)
 	}
 	d.offset += n
 	if buf != nil {
@@ -154,20 +154,20 @@ func (d *Decoder) consumeInt(buf *bytes.Buffer) error {
 		return err
 	}
 	if b != 'i' {
-		return d.newSyntaxError("unexpected integer prefix: %c", b)
+		return d.newSyntaxError("consumeInt: unexpected integer prefix: %c", b)
 	}
 	d.offset += 1
 	intStr, err := d.ReadString('e')
 	if err != nil {
-		return d.newSyntaxError("unterminated int: %w", err)
+		return d.newSyntaxError("consumeInt: unterminated int: %w", err)
 	}
 	intStr = intStr[:len(intStr)-1]
 	if leadingZero(intStr) {
-		return d.newSyntaxError("invalid int: %s", intStr)
+		return d.newSyntaxError("consumeInt: invalid int: %s", intStr)
 	}
 	_, err = strconv.ParseInt(intStr, 10, 64)
 	if err != nil {
-		return d.newSyntaxError("ParseInt: %w", err)
+		return d.newSyntaxError("consumeInt: %w", err)
 	}
 	d.offset += len(intStr) + 1
 	if buf != nil {
@@ -184,7 +184,7 @@ func (d *Decoder) consumeList(buf *bytes.Buffer) error {
 		return err
 	}
 	if b != 'l' {
-		return d.newSyntaxError("unexpected list prefix: %c", b)
+		return d.newSyntaxError("consumeList: unexpected list prefix: %c", b)
 	}
 	d.offset += 1
 	if buf != nil {
@@ -219,7 +219,7 @@ func (d *Decoder) consumeDictionary(buf *bytes.Buffer) error {
 		return err
 	}
 	if c != 'd' {
-		return d.newSyntaxError("unexpected dictionary prefix: %c", c)
+		return d.newSyntaxError("consumeDictionary: unexpected dictionary prefix: %c", c)
 	}
 	d.offset += 1
 	if buf != nil {
@@ -242,7 +242,7 @@ func (d *Decoder) consumeDictionary(buf *bytes.Buffer) error {
 			return err
 		}
 		if lastKey >= key {
-			return fmt.Errorf("dictionary keys not sorted")
+			return errors.New("consumeDictionary: dictionary keys not sorted")
 		}
 		lastKey = key
 		if err := d.consume(buf); err != nil {
@@ -259,17 +259,17 @@ func (d *Decoder) consumeDictionary(buf *bytes.Buffer) error {
 func (d *Decoder) decodeString(v reflect.Value) error {
 	lengthStr, err := d.ReadString(':')
 	if err != nil {
-		return d.newSyntaxError("unterminated string prefix: %w", err)
+		return d.newSyntaxError("decodeString: unterminated string prefix: %w", err)
 	}
 	length, err := strconv.Atoi(lengthStr[:len(lengthStr)-1])
 	if err != nil {
-		return d.newSyntaxError("Atoi: %w", err)
+		return d.newSyntaxError("decodeString: %w", err)
 	}
 	d.offset += len(lengthStr)
 	bytes := make([]byte, length)
 	n, err := io.ReadFull(d, bytes)
 	if err != nil {
-		return d.newSyntaxError("unexpected string eof: %d < %d: %w", n, length, err)
+		return d.newSyntaxError("decodeString: unexpected string eof: %d < %d: %w", n, length, err)
 	}
 	d.offset += n
 	if v.Kind() == reflect.Slice {
@@ -299,20 +299,20 @@ func (d *Decoder) decodeInt(v reflect.Value) error {
 		return err
 	}
 	if b != 'i' {
-		return d.newSyntaxError("unexpected integer prefix: %c", b)
+		return d.newSyntaxError("decodeInt: unexpected integer prefix: %c", b)
 	}
 	d.offset += 1
 	intStr, err := d.ReadString('e')
 	if err != nil {
-		return d.newSyntaxError("unterminated int: %w", err)
+		return d.newSyntaxError("decodeInt: unterminated int: %w", err)
 	}
 	intStr = intStr[:len(intStr)-1]
 	if leadingZero(intStr) {
-		return d.newSyntaxError("invalid int: %s", intStr)
+		return d.newSyntaxError("decodeInt: invalid int: %s", intStr)
 	}
 	i, err := strconv.ParseInt(intStr, 10, 64)
 	if err != nil {
-		return d.newSyntaxError("ParseInt: %w", err)
+		return d.newSyntaxError("decodeInt: %w", err)
 	}
 	d.offset += len(intStr) + 1
 	v.SetInt(i)
@@ -325,20 +325,20 @@ func (d *Decoder) decodeUint(v reflect.Value) error {
 		return err
 	}
 	if b != 'i' {
-		return d.newSyntaxError("unexpected integer prefix: %c", b)
+		return d.newSyntaxError("decodeUint: unexpected integer prefix: %c", b)
 	}
 	d.offset += 1
 	intStr, err := d.ReadString('e')
 	if err != nil {
-		return d.newSyntaxError("unterminated int: %w", err)
+		return d.newSyntaxError("decodeUint: unterminated int: %w", err)
 	}
 	intStr = intStr[:len(intStr)-1]
 	if leadingZero(intStr) {
-		return d.newSyntaxError("invalid int: %s", intStr)
+		return d.newSyntaxError("decodeUint: invalid int: %s", intStr)
 	}
 	i, err := strconv.ParseUint(intStr, 10, 64)
 	if err != nil {
-		return d.newSyntaxError("ParseUint: %w", err)
+		return d.newSyntaxError("decodeUint: %w", err)
 	}
 	d.offset += len(intStr) + 1
 	v.SetUint(i)
@@ -351,7 +351,7 @@ func (d *Decoder) decodeSlice(v reflect.Value) error {
 		return err
 	}
 	if b != 'l' {
-		return d.newSyntaxError("unexpected list prefix: %c", b)
+		return d.newSyntaxError("decodeSlice: unexpected list prefix: %c", b)
 	}
 	d.offset += 1
 	if v.Kind() == reflect.Slice && v.IsNil() {
@@ -404,7 +404,7 @@ func (d *Decoder) decodeMap(v reflect.Value) error {
 		return err
 	}
 	if c != 'd' {
-		return d.newSyntaxError("unexpected dictionary prefix: %c", c)
+		return d.newSyntaxError("decodeMap: unexpected dictionary prefix: %c", c)
 	}
 	d.offset += 1
 	t := v.Type()
@@ -433,7 +433,7 @@ func (d *Decoder) decodeMap(v reflect.Value) error {
 			return err
 		}
 		if lastKey >= key.String() {
-			return fmt.Errorf("dictionary keys not sorted")
+			return errors.New("decodeMap: dictionary keys not sorted")
 		}
 		lastKey = key.String()
 		elem := reflect.New(et)
@@ -460,7 +460,7 @@ func (d *Decoder) decodeStruct(v reflect.Value) error {
 		return err
 	}
 	if c != 'd' {
-		return d.newSyntaxError("unexpected dictionary prefix: %c", c)
+		return d.newSyntaxError("decodeStruct: unexpected dictionary prefix: %c", c)
 	}
 	d.offset += 1
 	keyToField := getFieldsForStruct(v).keyToField
@@ -481,7 +481,7 @@ func (d *Decoder) decodeStruct(v reflect.Value) error {
 			return err
 		}
 		if lastKey >= key.String() {
-			return fmt.Errorf("dictionary keys not sorted")
+			return errors.New("decodeStruct: dictionary keys not sorted")
 		}
 		lastKey = key.String()
 		field, ok := keyToField[key.String()]
@@ -535,7 +535,7 @@ func (d *Decoder) decodeInterface(v reflect.Value) error {
 		if isDigit(b) {
 			iv = reflect.New(stringType)
 		} else {
-			return d.newSyntaxError("unexpected prefix: %c", b)
+			return d.newSyntaxError("decodeInterface: unexpected prefix: %c", b)
 		}
 	}
 	if err := d.decode(iv.Elem()); err != nil {
