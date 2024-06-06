@@ -10,8 +10,9 @@ import (
 )
 
 type Metainfo struct {
-	Info         *Info      `bencode:"info"`
-	Announce     string     `bencode:"announce"`
+	Info     *Info  `bencode:"info"`
+	Announce string `bencode:"announce"`
+	// http://bittorrent.org/beps/bep_0012.html
 	AnnounceList [][]string `bencode:"announce-list,omitempty"`
 	CreationDate *Time      `bencode:"creation date,omitempty"`
 	Comment      string     `bencode:"comment,omitempty"`
@@ -40,7 +41,8 @@ type Info struct {
 	SHA1        [20]byte `bencode:"-"`
 	PieceLength int      `bencode:"piece length"`
 	Pieces      Pieces   `bencode:"pieces"`
-	Private     int      `bencode:"private,omitempty"`
+	// http://bittorrent.org/beps/bep_0027.html
+	Private int `bencode:"private,omitempty"`
 	// Advisory filename or directory, depending on the mode
 	Name string `bencode:"name"`
 	// Single file mode

@@ -21,7 +21,15 @@ type Request struct {
 	Downloaded int
 	Left       int
 	Event      string
+	Compact    bool
 	// more?
+}
+
+func ifelse[T any](t bool, a, b T) T {
+	if t {
+		return a
+	}
+	return b
 }
 
 func (t *Request) URL() *url.URL {
@@ -37,7 +45,7 @@ func (t *Request) URL() *url.URL {
 		"left":       strconv.Itoa(t.Left),
 		"event":      t.Event,
 		// http://bittorrent.org/beps/bep_0023.html
-		"compact": "1",
+		"compact": ifelse(t.Compact, "1", "0"),
 		// ?
 		"no_peer_id": "",
 		"numwant":    "",
@@ -89,9 +97,9 @@ func compactPeers(peers []*Peer) ([]byte, error) {
 	b := make([]byte, 6*len(peers))
 	i := 0
 	for _, p := range peers {
-		ip := net.ParseIP(p.IP)
-		if ip == nil || len(ip) > 4 {
-			return nil, fmt.Errorf(`peer "ip" is not an ipv4: %s`, p.IP)
+		ip := net.ParseIP(p.IP).To4()
+		if ip == nil {
+			return nil, fmt.Errorf(`peer "ip" is not an ipv4: %+v`, p.IP)
 		}
 		b[i] = ip[0]
 		b[i+1] = ip[1]
@@ -113,7 +121,7 @@ func (p *Peers) UnmarshalBencoding(data []byte) error {
 	case string:
 		p.Compact = true
 		p.List, err = parseCompactPeers(v)
-	case []map[string]any:
+	case []any:
 		p.List, err = parsePeers(v)
 	default:
 		return errors.New("unknown peers format")
@@ -138,9 +146,10 @@ func parseCompactPeers(compact string) ([]*Peer, error) {
 	return peers, nil
 }
 
-func parsePeers(peerMaps []map[string]any) ([]*Peer, error) {
+func parsePeers(peerMaps []any) ([]*Peer, error) {
 	var peers []*Peer
 	for _, m := range peerMaps {
+		m := m.(map[string]any)
 		peer := &Peer{
 			PeerID: m["peer id"].(string),
 			IP:     m["ip"].(string),
