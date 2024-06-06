@@ -81,6 +81,7 @@ func TestDecoder_decodeUnmarshaler(t *testing.T) {
 		{"int unmarshaler", new[intUnmarshaler](), "i12345e", intUnmarshaler(12), false},
 		{"list unmarshaler", new[listUnmarshaler](), "l3:abc4:defge", listUnmarshaler{"ABC", "DEFG"}, false},
 		{"dict unmarshaler", new[dictUnmarshaler](), "d6:a wordi1e6:b wordi2ee", dictUnmarshaler{A: 1, B: 2, c: 123}, false},
+		{"dict unmarshaler unsorted", new[dictUnmarshaler](), "d6:b wordi1e6:a wordi2ee", dictUnmarshaler{}, true},
 		{
 			"unmarshaler field",
 			new[struct {
@@ -272,6 +273,7 @@ func TestDecoder_decodeMap(t *testing.T) {
 		},
 		{"noninitiated dict", new[map[string]any](), "3:key5:valuee", map[string]any(nil), true},
 		{"nonterminated dict", new[map[string]any](), "d3:key5:value", map[string]any{"key": "value"}, true},
+		{"unsorted dict", new[map[string]any](), "d1:ai1e1:ci2e1:bi3ee", map[string]any{"a": int(1), "c": int(2)}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -436,6 +438,16 @@ func TestDecoder_decodeStruct(t *testing.T) {
 				simple: simple{X: 1, Y: 2, z: 0},
 			},
 			false,
+		},
+		{
+			"unsorted dict",
+			new[simpleEmbedded](),
+			"d1:ai1e1:yi2e1:xi3ee",
+			simpleEmbedded{
+				A: 1,
+				Y: 2,
+			},
+			true,
 		},
 	}
 	for _, tt := range tests {

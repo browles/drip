@@ -116,27 +116,28 @@ func (d *Decoder) consume(buf *bytes.Buffer) error {
 		return d.consumeDictionary(buf)
 	default:
 		if isDigit(b) {
-			return d.consumeString(buf)
+			_, err := d.consumeString(buf)
+			return err
 		}
 		return d.newSyntaxError("unexpected prefix: %c", b)
 	}
 }
 
-func (d *Decoder) consumeString(buf *bytes.Buffer) error {
+func (d *Decoder) consumeString(buf *bytes.Buffer) (string, error) {
 	lengthStr, err := d.ReadString(':')
 	if err != nil {
-		return d.newSyntaxError("unterminated string prefix: %w", err)
+		return "", d.newSyntaxError("unterminated string prefix: %w", err)
 	}
 	lengthStr = lengthStr[:len(lengthStr)-1]
 	length, err := strconv.Atoi(lengthStr)
 	if err != nil {
-		return d.newSyntaxError("Atoi: %w", err)
+		return "", d.newSyntaxError("Atoi: %w", err)
 	}
 	d.offset += len(lengthStr) + 1
 	bytes := make([]byte, length)
 	n, err := io.ReadFull(d, bytes)
 	if err != nil {
-		return d.newSyntaxError("unexpected string eof: %d < %d: %w", n, length, err)
+		return "", d.newSyntaxError("unexpected string eof: %d < %d: %w", n, length, err)
 	}
 	d.offset += n
 	if buf != nil {
@@ -144,7 +145,7 @@ func (d *Decoder) consumeString(buf *bytes.Buffer) error {
 		buf.WriteByte(':')
 		buf.Write(bytes)
 	}
-	return nil
+	return string(bytes), nil
 }
 
 func (d *Decoder) consumeInt(buf *bytes.Buffer) error {
@@ -224,6 +225,7 @@ func (d *Decoder) consumeDictionary(buf *bytes.Buffer) error {
 	if buf != nil {
 		buf.WriteByte('d')
 	}
+	lastKey := ""
 	for {
 		c, err := d.ReadByte()
 		if err != nil {
@@ -235,9 +237,14 @@ func (d *Decoder) consumeDictionary(buf *bytes.Buffer) error {
 		if err := d.UnreadByte(); err != nil {
 			return err
 		}
-		if err := d.consumeString(buf); err != nil {
+		key, err := d.consumeString(buf)
+		if err != nil {
 			return err
 		}
+		if lastKey >= key {
+			return fmt.Errorf("dictionary keys not sorted")
+		}
+		lastKey = key
 		if err := d.consume(buf); err != nil {
 			return err
 		}
@@ -409,6 +416,7 @@ func (d *Decoder) decodeMap(v reflect.Value) error {
 	if v.IsNil() {
 		v.Set(reflect.MakeMap(t))
 	}
+	lastKey := ""
 	for {
 		c, err := d.ReadByte()
 		if err != nil {
@@ -424,6 +432,10 @@ func (d *Decoder) decodeMap(v reflect.Value) error {
 		if err := d.decodeString(key); err != nil {
 			return err
 		}
+		if lastKey >= key.String() {
+			return fmt.Errorf("dictionary keys not sorted")
+		}
+		lastKey = key.String()
 		elem := reflect.New(et)
 		// Pass the pointer to check for a unmarshaler with a pointer receiver.
 		if err := d.decode(elem); err != nil {
@@ -452,6 +464,7 @@ func (d *Decoder) decodeStruct(v reflect.Value) error {
 	}
 	d.offset += 1
 	keyToField := getFieldsForStruct(v).keyToField
+	lastKey := ""
 	for {
 		c, err := d.ReadByte()
 		if err != nil {
@@ -467,6 +480,10 @@ func (d *Decoder) decodeStruct(v reflect.Value) error {
 		if err := d.decodeString(key); err != nil {
 			return err
 		}
+		if lastKey >= key.String() {
+			return fmt.Errorf("dictionary keys not sorted")
+		}
+		lastKey = key.String()
 		field, ok := keyToField[key.String()]
 		if !ok {
 			if err := d.consume(nil); err != nil {
