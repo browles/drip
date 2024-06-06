@@ -9,7 +9,7 @@ type Magnet struct {
 	ExactTopic string
 	Name       string
 	Length     int
-	Trackers   []*url.URL
+	Trackers   []string
 	WebSeed    string
 	Peers      []string
 }
@@ -23,6 +23,7 @@ func ParseMagnetURL(link string) (*Magnet, error) {
 	ma := &Magnet{
 		ExactTopic: query.Get("xt"),
 		Name:       query.Get("dn"),
+		Trackers:   query["tr"],
 		WebSeed:    query.Get("ws"),
 		Peers:      query["x.pe"],
 	}
@@ -31,13 +32,6 @@ func ParseMagnetURL(link string) (*Magnet, error) {
 		if ma.Length, err = strconv.Atoi(xl); err != nil {
 			return nil, err
 		}
-	}
-	for _, tr := range query["tr"] {
-		tracker, err := url.Parse(tr)
-		if err != nil {
-			return nil, err
-		}
-		ma.Trackers = append(ma.Trackers, tracker)
 	}
 	return ma, nil
 }
