@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -8,54 +9,27 @@ import (
 )
 
 func ReadHandshake(r io.Reader) (*Handshake, error) {
-	data := make([]byte, HandshakeLength)
-	if _, err := r.Read(data[:1]); err != nil {
-		return nil, err
-	}
-	if int(data[0]) != len(HandshakeProtocol) {
-		return nil, errors.New("unsupported handshake protocol")
-	}
-	if _, err := io.ReadFull(r, data[1:]); err != nil {
-		return nil, err
-	}
 	var handshake Handshake
-	if err := handshake.UnmarshalBinary(data); err != nil {
+	if err := handshake.Decode(r); err != nil {
 		return nil, err
 	}
 	return &handshake, nil
 }
 
-func Read(r io.Reader) (*Message, error) {
-	lengthBytes := make([]byte, 4)
-	if _, err := io.ReadFull(r, lengthBytes); err != nil {
-		return nil, err
-	}
-	length := binary.BigEndian.Uint32(lengthBytes)
-	if length == 0 {
-		return Keepalive, nil
-	}
-	data := make([]byte, length)
-	if _, err := io.ReadFull(r, data); err != nil {
-		return nil, err
-	}
+func ReadMessage(r io.Reader) (*Message, error) {
 	var message Message
-	if err := message.UnmarshalBinary(data); err != nil {
+	if err := message.Decode(r); err != nil {
 		return nil, err
 	}
 	return &message, nil
 }
 
-func Write(w io.Writer, bm BinaryMarshaler) (int, error) {
-	bs, err := bm.MarshalBinary()
-	if err != nil {
-		return 0, err
-	}
-	return w.Write(bs)
+func Write(w io.Writer, e encoder) error {
+	return e.Encode(w)
 }
 
-type BinaryMarshaler interface {
-	MarshalBinary() ([]byte, error)
-	UnmarshalBinary(data []byte) error
+type encoder interface {
+	Encode(w io.Writer) error
 }
 
 const (
@@ -68,19 +42,38 @@ type Handshake struct {
 	PeerID   [20]byte
 }
 
-func (p *Handshake) MarshalBinary() ([]byte, error) {
-	b := make([]byte, HandshakeLength)
-	b[0] = byte(len(HandshakeProtocol))
+func (p *Handshake) Encode(w io.Writer) error {
+	data := make([]byte, HandshakeLength)
+	data[0] = byte(len(HandshakeProtocol))
 	curr := 1
-	curr += copy(b[curr:curr+len(HandshakeProtocol)], HandshakeProtocol)
-	curr += copy(b[curr:curr+8], make([]byte, 8))
-	curr += copy(b[curr:curr+20], p.InfoHash[:])
-	curr += copy(b[curr:curr+20], p.PeerID[:])
-	return b, nil
+	curr += copy(data[curr:curr+len(HandshakeProtocol)], HandshakeProtocol)
+	curr += copy(data[curr:curr+8], make([]byte, 8))
+	curr += copy(data[curr:curr+20], p.InfoHash[:])
+	curr += copy(data[curr:curr+20], p.PeerID[:])
+	_, err := w.Write(data)
+	return err
 }
 
-func (p *Handshake) UnmarshalBinary(data []byte) error {
-	protocolLen := data[0]
+func (p *Handshake) MarshalBinary() ([]byte, error) {
+	var bu bytes.Buffer
+	if err := p.Encode(&bu); err != nil {
+		return nil, err
+	}
+	return bu.Bytes(), nil
+}
+
+func (p *Handshake) Decode(r io.Reader) error {
+	data := make([]byte, HandshakeLength)
+	if _, err := r.Read(data[:1]); err != nil {
+		return err
+	}
+	protocolLen := int(data[0])
+	if protocolLen != len(HandshakeProtocol) {
+		return errors.New("unsupported handshake protocol")
+	}
+	if _, err := io.ReadFull(r, data[1:]); err != nil {
+		return err
+	}
 	protocol := data[1 : 1+protocolLen]
 	if string(protocol) != HandshakeProtocol {
 		return fmt.Errorf("unsupported handshake protocol: %s", protocol)
@@ -91,44 +84,121 @@ func (p *Handshake) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-type MessageType uint8
+func (p *Handshake) UnmarshalBinary(data []byte) error {
+	return p.Decode(bytes.NewReader(data))
+}
+
+type MessageType int
 
 const (
-	Choke MessageType = iota
-	Unchoke
-	Interested
-	NotInterested
-	Have
-	Bitfield
-	Request
-	Piece
-	Cancel
+	// Non-standard, so use an unused int
+	KEEPALIVE             = MessageType(-1)
+	CHOKE     MessageType = iota
+	UNCHOKE
+	INTERESTED
+	NOT_INTERESTED
+	HAVE
+	BITFIELD
+	REQUEST
+	PIECE
+	CANCEL
 )
 
-var Keepalive = (*Message)(nil)
-
 type Message struct {
-	Type    MessageType
-	Payload []byte
+	Type     MessageType
+	Bitfield Bitfield
+	Index    int
+	Begin    int
+	Length   int
+	Piece    []byte
+}
+
+func (p *Message) Encode(w io.Writer) error {
+	var fixedData, variableData []byte
+	switch p.Type {
+	case KEEPALIVE:
+		fixedData = make([]byte, 4)
+	case CHOKE, UNCHOKE, INTERESTED, NOT_INTERESTED:
+		fixedData = make([]byte, 4+1)
+		binary.BigEndian.PutUint32(fixedData[0:4], 1)
+		fixedData[4] = byte(p.Type)
+	case BITFIELD:
+		fixedData = make([]byte, 4+1)
+		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+len(p.Bitfield)))
+		fixedData[4] = byte(p.Type)
+		variableData = p.Bitfield
+	case HAVE:
+		fixedData = make([]byte, 4+1+4)
+		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+4))
+		fixedData[4] = byte(p.Type)
+		binary.BigEndian.PutUint32(fixedData[5:9], uint32(p.Index))
+	case REQUEST, CANCEL:
+		fixedData = make([]byte, 4+1+12)
+		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+12))
+		fixedData[4] = byte(p.Type)
+		binary.BigEndian.PutUint32(fixedData[5:9], uint32(p.Index))
+		binary.BigEndian.PutUint32(fixedData[9:13], uint32(p.Begin))
+		binary.BigEndian.PutUint32(fixedData[13:17], uint32(p.Length))
+	case PIECE:
+		fixedData = make([]byte, 4+1+8)
+		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+8+len(p.Piece)))
+		fixedData[4] = byte(p.Type)
+		binary.BigEndian.PutUint32(fixedData[5:9], uint32(p.Index))
+		binary.BigEndian.PutUint32(fixedData[9:13], uint32(p.Begin))
+		variableData = p.Piece
+	}
+	if _, err := w.Write(fixedData); err != nil {
+		return err
+	}
+	if _, err := w.Write(variableData); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (p *Message) MarshalBinary() ([]byte, error) {
-	if p == Keepalive {
-		return make([]byte, 4), nil
+	var bu bytes.Buffer
+	err := p.Encode(&bu)
+	if err != nil {
+		return nil, err
 	}
-	b := make([]byte, len(p.Payload)+5)
-	binary.BigEndian.PutUint32(b[:4], uint32(len(p.Payload)+1))
-	b[4] = byte(p.Type)
-	copy(b[5:], p.Payload)
-	return b, nil
+	return bu.Bytes(), nil
+}
+
+func (p *Message) Decode(r io.Reader) error {
+	lengthBytes := make([]byte, 4)
+	if _, err := io.ReadFull(r, lengthBytes); err != nil {
+		return err
+	}
+	length := binary.BigEndian.Uint32(lengthBytes)
+	if length == 0 {
+		p.Type = KEEPALIVE
+		return nil
+	}
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return err
+	}
+	p.Type = MessageType(payload[0])
+	payload = payload[1:]
+	switch p.Type {
+	case CHOKE, UNCHOKE, INTERESTED, NOT_INTERESTED:
+	case BITFIELD:
+		p.Bitfield = payload
+	case HAVE:
+		p.Index = int(binary.BigEndian.Uint32(payload[0:4]))
+	case REQUEST, CANCEL:
+		p.Index = int(binary.BigEndian.Uint32(payload[0:4]))
+		p.Begin = int(binary.BigEndian.Uint32(payload[4:8]))
+		p.Length = int(binary.BigEndian.Uint32(payload[8:12]))
+	case PIECE:
+		p.Index = int(binary.BigEndian.Uint32(payload[0:4]))
+		p.Begin = int(binary.BigEndian.Uint32(payload[4:8]))
+		p.Piece = payload[8:]
+	}
+	return nil
 }
 
 func (p *Message) UnmarshalBinary(data []byte) error {
-	length := binary.BigEndian.Uint32(data[:4])
-	if int(length) != len(data)-4 {
-		return fmt.Errorf("length mismatch: %d != %d", length, len(data)-4)
-	}
-	p.Type = MessageType(data[4])
-	p.Payload = data[5:]
-	return nil
+	return p.Decode(bytes.NewReader(data))
 }
