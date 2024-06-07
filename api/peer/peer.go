@@ -92,16 +92,16 @@ type MessageType int
 
 const (
 	// Non-standard, so use an unused int
-	KEEPALIVE MessageType = -1
-	CHOKE                 = iota
-	UNCHOKE
-	INTERESTED
-	NOT_INTERESTED
-	HAVE
-	BITFIELD
-	REQUEST
-	PIECE
-	CANCEL
+	KEEPALIVE      MessageType = -1
+	CHOKE          MessageType = 0
+	UNCHOKE        MessageType = 1
+	INTERESTED     MessageType = 2
+	NOT_INTERESTED MessageType = 3
+	HAVE           MessageType = 4
+	BITFIELD       MessageType = 5
+	REQUEST        MessageType = 6
+	PIECE          MessageType = 7
+	CANCEL         MessageType = 8
 )
 
 type Message struct {

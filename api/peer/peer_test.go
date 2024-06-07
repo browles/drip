@@ -107,7 +107,7 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			&Message{
 				Type: CHOKE,
 			},
-			[]byte{0, 0, 0, 1, byte(CHOKE)},
+			[]byte{0, 0, 0, 1, 0},
 			false,
 		},
 		{
@@ -115,7 +115,7 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			&Message{
 				Type: UNCHOKE,
 			},
-			[]byte{0, 0, 0, 1, byte(UNCHOKE)},
+			[]byte{0, 0, 0, 1, 1},
 			false,
 		},
 		{
@@ -123,7 +123,7 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			&Message{
 				Type: INTERESTED,
 			},
-			[]byte{0, 0, 0, 1, byte(INTERESTED)},
+			[]byte{0, 0, 0, 1, 2},
 			false,
 		},
 		{
@@ -131,16 +131,7 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			&Message{
 				Type: NOT_INTERESTED,
 			},
-			[]byte{0, 0, 0, 1, byte(NOT_INTERESTED)},
-			false,
-		},
-		{
-			"bitfield",
-			&Message{
-				Type:     BITFIELD,
-				Bitfield: Bitfield{0b01010101, 0b11001100},
-			},
-			[]byte{0, 0, 0, 3, byte(BITFIELD), 0b01010101, 0b11001100},
+			[]byte{0, 0, 0, 1, 3},
 			false,
 		},
 		{
@@ -149,7 +140,16 @@ func TestMessage_MarshalBinary(t *testing.T) {
 				Type:  HAVE,
 				Index: 0x01020304,
 			},
-			[]byte{0, 0, 0, 5, byte(HAVE), 0x01, 0x02, 0x03, 0x04},
+			[]byte{0, 0, 0, 5, 4, 0x01, 0x02, 0x03, 0x04},
+			false,
+		},
+		{
+			"bitfield",
+			&Message{
+				Type:     BITFIELD,
+				Bitfield: Bitfield{0b01010101, 0b11001100},
+			},
+			[]byte{0, 0, 0, 3, 5, 0b01010101, 0b11001100},
 			false,
 		},
 		{
@@ -161,23 +161,7 @@ func TestMessage_MarshalBinary(t *testing.T) {
 				Length: 0x55667788,
 			},
 			[]byte{
-				0, 0, 0, 13, byte(REQUEST),
-				0x01, 0x02, 0x03, 0x04,
-				0x11, 0x22, 0x33, 0x44,
-				0x55, 0x66, 0x77, 0x88,
-			},
-			false,
-		},
-		{
-			"cancel",
-			&Message{
-				Type:   CANCEL,
-				Index:  0x01020304,
-				Begin:  0x11223344,
-				Length: 0x55667788,
-			},
-			[]byte{
-				0, 0, 0, 13, byte(CANCEL),
+				0, 0, 0, 13, 6,
 				0x01, 0x02, 0x03, 0x04,
 				0x11, 0x22, 0x33, 0x44,
 				0x55, 0x66, 0x77, 0x88,
@@ -193,10 +177,27 @@ func TestMessage_MarshalBinary(t *testing.T) {
 				Piece: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9},
 			},
 			[]byte{
-				0, 0, 0, 18, byte(PIECE),
+				0, 0, 0, 18, 7,
 				0x01, 0x02, 0x03, 0x04,
 				0x11, 0x22, 0x33, 0x44,
 				1, 2, 3, 4, 5, 6, 7, 8, 9,
+			},
+			false,
+		},
+
+		{
+			"cancel",
+			&Message{
+				Type:   CANCEL,
+				Index:  0x01020304,
+				Begin:  0x11223344,
+				Length: 0x55667788,
+			},
+			[]byte{
+				0, 0, 0, 13, 8,
+				0x01, 0x02, 0x03, 0x04,
+				0x11, 0x22, 0x33, 0x44,
+				0x55, 0x66, 0x77, 0x88,
 			},
 			false,
 		},
@@ -232,7 +233,7 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 		},
 		{
 			"choke",
-			[]byte{0, 0, 0, 1, byte(CHOKE)},
+			[]byte{0, 0, 0, 1, 0},
 			&Message{
 				Type: CHOKE,
 			},
@@ -240,7 +241,7 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 		},
 		{
 			"unchoke",
-			[]byte{0, 0, 0, 1, byte(UNCHOKE)},
+			[]byte{0, 0, 0, 1, 1},
 			&Message{
 				Type: UNCHOKE,
 			},
@@ -248,7 +249,7 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 		},
 		{
 			"interested",
-			[]byte{0, 0, 0, 1, byte(INTERESTED)},
+			[]byte{0, 0, 0, 1, 2},
 			&Message{
 				Type: INTERESTED,
 			},
@@ -256,24 +257,15 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 		},
 		{
 			"not interested",
-			[]byte{0, 0, 0, 1, byte(NOT_INTERESTED)},
+			[]byte{0, 0, 0, 1, 3},
 			&Message{
 				Type: NOT_INTERESTED,
 			},
 			false,
 		},
 		{
-			"bitfield",
-			[]byte{0, 0, 0, 3, byte(BITFIELD), 0b01010101, 0b11001100},
-			&Message{
-				Type:     BITFIELD,
-				Bitfield: Bitfield{0b01010101, 0b11001100},
-			},
-			false,
-		},
-		{
 			"have",
-			[]byte{0, 0, 0, 5, byte(HAVE), 0x01, 0x02, 0x03, 0x04},
+			[]byte{0, 0, 0, 5, 4, 0x01, 0x02, 0x03, 0x04},
 			&Message{
 				Type:  HAVE,
 				Index: 0x01020304,
@@ -281,9 +273,18 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 			false,
 		},
 		{
+			"bitfield",
+			[]byte{0, 0, 0, 3, 5, 0b01010101, 0b11001100},
+			&Message{
+				Type:     BITFIELD,
+				Bitfield: Bitfield{0b01010101, 0b11001100},
+			},
+			false,
+		},
+		{
 			"request",
 			[]byte{
-				0, 0, 0, 13, byte(REQUEST),
+				0, 0, 0, 13, 6,
 				0x01, 0x02, 0x03, 0x04,
 				0x11, 0x22, 0x33, 0x44,
 				0x55, 0x66, 0x77, 0x88,
@@ -297,25 +298,9 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 			false,
 		},
 		{
-			"cancel",
-			[]byte{
-				0, 0, 0, 13, byte(CANCEL),
-				0x01, 0x02, 0x03, 0x04,
-				0x11, 0x22, 0x33, 0x44,
-				0x55, 0x66, 0x77, 0x88,
-			},
-			&Message{
-				Type:   CANCEL,
-				Index:  0x01020304,
-				Begin:  0x11223344,
-				Length: 0x55667788,
-			},
-			false,
-		},
-		{
 			"piece",
 			[]byte{
-				0, 0, 0, 18, byte(PIECE),
+				0, 0, 0, 18, 7,
 				0x01, 0x02, 0x03, 0x04,
 				0x11, 0x22, 0x33, 0x44,
 				1, 2, 3, 4, 5, 6, 7, 8, 9,
@@ -328,6 +313,24 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 			},
 			false,
 		},
+
+		{
+			"cancel",
+			[]byte{
+				0, 0, 0, 13, 8,
+				0x01, 0x02, 0x03, 0x04,
+				0x11, 0x22, 0x33, 0x44,
+				0x55, 0x66, 0x77, 0x88,
+			},
+			&Message{
+				Type:   CANCEL,
+				Index:  0x01020304,
+				Begin:  0x11223344,
+				Length: 0x55667788,
+			},
+
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -338,7 +341,7 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 				return
 			}
 			if !reflect.DeepEqual(m, tt.want) {
-				t.Errorf("Message.UnmarshalBinary() = %v, want %v", m, tt.want)
+				t.Errorf("Message.UnmarshalBinary() = %+v, want %+v", m, tt.want)
 			}
 		})
 	}
