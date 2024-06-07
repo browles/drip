@@ -32,20 +32,20 @@ func ifelse[T any](t bool, a, b T) T {
 	return b
 }
 
-func (t *Request) URL() *url.URL {
+func (r *Request) URL() *url.URL {
 	params := make(url.Values)
 	for k, v := range map[string]string{
 		// http://bittorrent.org/beps/bep_0003.html
-		"info_hash":  string(t.InfoHash[:]),
-		"peer_id":    t.PeerID,
-		"ip":         t.IP,
-		"port":       strconv.Itoa(t.Port),
-		"uploaded":   strconv.Itoa(t.Uploaded),
-		"downloaded": strconv.Itoa(t.Downloaded),
-		"left":       strconv.Itoa(t.Left),
-		"event":      t.Event,
+		"info_hash":  string(r.InfoHash[:]),
+		"peer_id":    r.PeerID,
+		"ip":         r.IP,
+		"port":       strconv.Itoa(r.Port),
+		"uploaded":   strconv.Itoa(r.Uploaded),
+		"downloaded": strconv.Itoa(r.Downloaded),
+		"left":       strconv.Itoa(r.Left),
+		"event":      r.Event,
 		// http://bittorrent.org/beps/bep_0023.html
-		"compact": ifelse(t.Compact, "1", "0"),
+		"compact": ifelse(r.Compact, "1", "0"),
 		// ?
 		"no_peer_id": "",
 		"numwant":    "",
@@ -56,7 +56,7 @@ func (t *Request) URL() *url.URL {
 			params.Set(k, v)
 		}
 	}
-	url, err := url.Parse(t.Announce)
+	url, err := url.Parse(r.Announce)
 	if err != nil {
 		return nil
 	}

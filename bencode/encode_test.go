@@ -73,7 +73,7 @@ func TestEncoder_encodeString(t *testing.T) {
 func TestEncoder_encodeBytes(t *testing.T) {
 	tests := []struct {
 		name string
-		s    []byte
+		b    []byte
 		want string
 	}{
 		{"0 length", []byte{}, "0:"},
@@ -83,7 +83,7 @@ func TestEncoder_encodeBytes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			be := newStringEncoder()
-			be.e.encodeBytes(reflect.ValueOf(tt.s))
+			be.e.encodeBytes(reflect.ValueOf(tt.b))
 			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Encoder.encodeBytes() = %v, want %v", got, tt.want)
 			}
@@ -135,7 +135,7 @@ func TestEncoder_encodeUint(t *testing.T) {
 func TestEncoder_encodeSlice(t *testing.T) {
 	tests := []struct {
 		name string
-		l    []any
+		s    []any
 		want string
 	}{
 		{"nil slice", nil, ""},
@@ -147,7 +147,7 @@ func TestEncoder_encodeSlice(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			be := newStringEncoder()
-			be.e.encodeSlice(reflect.ValueOf(tt.l))
+			be.e.encodeSlice(reflect.ValueOf(tt.s))
 			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Encoder.encodeSlice() = %v, want %v", got, tt.want)
 			}
@@ -158,7 +158,7 @@ func TestEncoder_encodeSlice(t *testing.T) {
 func TestEncoder_encodeMap(t *testing.T) {
 	tests := []struct {
 		name string
-		d    map[string]any
+		m    map[string]any
 		want string
 	}{
 		{"nil map", nil, ""},
@@ -171,7 +171,7 @@ func TestEncoder_encodeMap(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			be := newStringEncoder()
-			be.e.encodeMap(reflect.ValueOf(tt.d))
+			be.e.encodeMap(reflect.ValueOf(tt.m))
 			if got := be.b.String(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Encoder.encodeMap() = %v, want %v", got, tt.want)
 			}

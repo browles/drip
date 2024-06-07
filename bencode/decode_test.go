@@ -73,7 +73,7 @@ func TestDecoder_decodeUnmarshaler(t *testing.T) {
 	tests := []struct {
 		name    string
 		v       reflect.Value
-		s       string
+		data    string
 		want    any
 		wantErr bool
 	}{
@@ -101,7 +101,7 @@ func TestDecoder_decodeUnmarshaler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := newStringDecoder(tt.s)
+			d := newStringDecoder(tt.data)
 			err := d.decode(tt.v)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Decoder.decodeUnmarshaler() error = %v, wantErr %v", err, tt.wantErr)
@@ -118,7 +118,7 @@ func TestDecoder_decodeString(t *testing.T) {
 	tests := []struct {
 		name    string
 		v       reflect.Value
-		s       string
+		data    string
 		want    any
 		wantErr bool
 	}{
@@ -131,7 +131,7 @@ func TestDecoder_decodeString(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := newStringDecoder(tt.s)
+			d := newStringDecoder(tt.data)
 			err := d.decodeString(reflect.Indirect(tt.v))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Decoder.decodeString() error = %v, wantErr %v", err, tt.wantErr)
@@ -148,7 +148,7 @@ func TestDecoder_decodeInt(t *testing.T) {
 	tests := []struct {
 		name    string
 		v       reflect.Value
-		s       string
+		data    string
 		want    any
 		wantErr bool
 	}{
@@ -165,7 +165,7 @@ func TestDecoder_decodeInt(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := newStringDecoder(tt.s)
+			d := newStringDecoder(tt.data)
 			err := d.decodeInt(reflect.Indirect(tt.v))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Decoder.decodeInt() error = %v, wantErr %v", err, tt.wantErr)
@@ -182,7 +182,7 @@ func TestDecoder_decodeUint(t *testing.T) {
 	tests := []struct {
 		name    string
 		v       reflect.Value
-		s       string
+		data    string
 		want    any
 		wantErr bool
 	}{
@@ -195,7 +195,7 @@ func TestDecoder_decodeUint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := newStringDecoder(tt.s)
+			d := newStringDecoder(tt.data)
 			err := d.decodeUint(reflect.Indirect(tt.v))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Decoder.decodeInt() error = %v, wantErr %v", err, tt.wantErr)
@@ -212,7 +212,7 @@ func TestDecoder_decodeSlice(t *testing.T) {
 	tests := []struct {
 		name    string
 		v       reflect.Value
-		s       string
+		data    string
 		want    any
 		wantErr bool
 	}{
@@ -232,7 +232,7 @@ func TestDecoder_decodeSlice(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := newStringDecoder(tt.s)
+			d := newStringDecoder(tt.data)
 			err := d.decodeSlice(reflect.Indirect(tt.v))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Decoder.decodeSlice() error = %v, wantErr %v", err, tt.wantErr)
@@ -249,7 +249,7 @@ func TestDecoder_decodeMap(t *testing.T) {
 	tests := []struct {
 		name    string
 		v       reflect.Value
-		s       string
+		data    string
 		want    any
 		wantErr bool
 	}{
@@ -277,7 +277,7 @@ func TestDecoder_decodeMap(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := newStringDecoder(tt.s)
+			d := newStringDecoder(tt.data)
 			err := d.decodeMap(reflect.Indirect(tt.v))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Decoder.decodeMap() error = %v, wantErr %v", err, tt.wantErr)
@@ -322,7 +322,7 @@ func TestDecoder_decodeStruct(t *testing.T) {
 	tests := []struct {
 		name    string
 		v       reflect.Value
-		s       string
+		data    string
 		want    any
 		wantErr bool
 	}{
@@ -452,7 +452,7 @@ func TestDecoder_decodeStruct(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := newStringDecoder(tt.s)
+			d := newStringDecoder(tt.data)
 			err := d.decodeStruct(reflect.Indirect(tt.v))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Decoder.decodeStruct() error = %v, wantErr %v", err, tt.wantErr)
@@ -468,7 +468,7 @@ func TestDecoder_decodeInterface(t *testing.T) {
 	tests := []struct {
 		name    string
 		v       reflect.Value
-		s       string
+		data    string
 		want    any
 		wantErr bool
 	}{
@@ -480,7 +480,7 @@ func TestDecoder_decodeInterface(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := newStringDecoder(tt.s)
+			d := newStringDecoder(tt.data)
 			err := d.decodeInterface(tt.v)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Decoder.decodeInterface() error = %v, wantErr %v", err, tt.wantErr)

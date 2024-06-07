@@ -42,27 +42,27 @@ type Handshake struct {
 	PeerID   [20]byte
 }
 
-func (p *Handshake) Encode(w io.Writer) error {
+func (h *Handshake) Encode(w io.Writer) error {
 	data := make([]byte, HandshakeLength)
 	data[0] = byte(len(HandshakeProtocol))
 	curr := 1
 	curr += copy(data[curr:curr+len(HandshakeProtocol)], HandshakeProtocol)
 	curr += copy(data[curr:curr+8], make([]byte, 8))
-	curr += copy(data[curr:curr+20], p.InfoHash[:])
-	curr += copy(data[curr:curr+20], p.PeerID[:])
+	curr += copy(data[curr:curr+20], h.InfoHash[:])
+	curr += copy(data[curr:curr+20], h.PeerID[:])
 	_, err := w.Write(data)
 	return err
 }
 
-func (p *Handshake) MarshalBinary() ([]byte, error) {
+func (h *Handshake) MarshalBinary() ([]byte, error) {
 	var bu bytes.Buffer
-	if err := p.Encode(&bu); err != nil {
+	if err := h.Encode(&bu); err != nil {
 		return nil, err
 	}
 	return bu.Bytes(), nil
 }
 
-func (p *Handshake) Decode(r io.Reader) error {
+func (h *Handshake) Decode(r io.Reader) error {
 	data := make([]byte, HandshakeLength)
 	if _, err := r.Read(data[:1]); err != nil {
 		return err
@@ -79,21 +79,21 @@ func (p *Handshake) Decode(r io.Reader) error {
 		return fmt.Errorf("unsupported handshake protocol: %s", protocol)
 	}
 	curr := 1 + int(protocolLen) + 8
-	curr += copy(p.InfoHash[:], data[curr:curr+20])
-	curr += copy(p.PeerID[:], data[curr:curr+20])
+	curr += copy(h.InfoHash[:], data[curr:curr+20])
+	curr += copy(h.PeerID[:], data[curr:curr+20])
 	return nil
 }
 
-func (p *Handshake) UnmarshalBinary(data []byte) error {
-	return p.Decode(bytes.NewReader(data))
+func (h *Handshake) UnmarshalBinary(data []byte) error {
+	return h.Decode(bytes.NewReader(data))
 }
 
 type MessageType int
 
 const (
 	// Non-standard, so use an unused int
-	KEEPALIVE             = MessageType(-1)
-	CHOKE     MessageType = iota
+	KEEPALIVE MessageType = -1
+	CHOKE                 = iota
 	UNCHOKE
 	INTERESTED
 	NOT_INTERESTED
@@ -113,39 +113,39 @@ type Message struct {
 	Piece    []byte
 }
 
-func (p *Message) Encode(w io.Writer) error {
+func (m *Message) Encode(w io.Writer) error {
 	var fixedData, variableData []byte
-	switch p.Type {
+	switch m.Type {
 	case KEEPALIVE:
 		fixedData = make([]byte, 4)
 	case CHOKE, UNCHOKE, INTERESTED, NOT_INTERESTED:
 		fixedData = make([]byte, 4+1)
 		binary.BigEndian.PutUint32(fixedData[0:4], 1)
-		fixedData[4] = byte(p.Type)
+		fixedData[4] = byte(m.Type)
 	case BITFIELD:
 		fixedData = make([]byte, 4+1)
-		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+len(p.Bitfield)))
-		fixedData[4] = byte(p.Type)
-		variableData = p.Bitfield
+		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+len(m.Bitfield)))
+		fixedData[4] = byte(m.Type)
+		variableData = m.Bitfield
 	case HAVE:
 		fixedData = make([]byte, 4+1+4)
 		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+4))
-		fixedData[4] = byte(p.Type)
-		binary.BigEndian.PutUint32(fixedData[5:9], uint32(p.Index))
+		fixedData[4] = byte(m.Type)
+		binary.BigEndian.PutUint32(fixedData[5:9], uint32(m.Index))
 	case REQUEST, CANCEL:
 		fixedData = make([]byte, 4+1+12)
 		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+12))
-		fixedData[4] = byte(p.Type)
-		binary.BigEndian.PutUint32(fixedData[5:9], uint32(p.Index))
-		binary.BigEndian.PutUint32(fixedData[9:13], uint32(p.Begin))
-		binary.BigEndian.PutUint32(fixedData[13:17], uint32(p.Length))
+		fixedData[4] = byte(m.Type)
+		binary.BigEndian.PutUint32(fixedData[5:9], uint32(m.Index))
+		binary.BigEndian.PutUint32(fixedData[9:13], uint32(m.Begin))
+		binary.BigEndian.PutUint32(fixedData[13:17], uint32(m.Length))
 	case PIECE:
 		fixedData = make([]byte, 4+1+8)
-		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+8+len(p.Piece)))
-		fixedData[4] = byte(p.Type)
-		binary.BigEndian.PutUint32(fixedData[5:9], uint32(p.Index))
-		binary.BigEndian.PutUint32(fixedData[9:13], uint32(p.Begin))
-		variableData = p.Piece
+		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+8+len(m.Piece)))
+		fixedData[4] = byte(m.Type)
+		binary.BigEndian.PutUint32(fixedData[5:9], uint32(m.Index))
+		binary.BigEndian.PutUint32(fixedData[9:13], uint32(m.Begin))
+		variableData = m.Piece
 	}
 	if _, err := w.Write(fixedData); err != nil {
 		return err
@@ -156,49 +156,49 @@ func (p *Message) Encode(w io.Writer) error {
 	return nil
 }
 
-func (p *Message) MarshalBinary() ([]byte, error) {
+func (m *Message) MarshalBinary() ([]byte, error) {
 	var bu bytes.Buffer
-	err := p.Encode(&bu)
+	err := m.Encode(&bu)
 	if err != nil {
 		return nil, err
 	}
 	return bu.Bytes(), nil
 }
 
-func (p *Message) Decode(r io.Reader) error {
+func (m *Message) Decode(r io.Reader) error {
 	lengthBytes := make([]byte, 4)
 	if _, err := io.ReadFull(r, lengthBytes); err != nil {
 		return err
 	}
 	length := binary.BigEndian.Uint32(lengthBytes)
 	if length == 0 {
-		p.Type = KEEPALIVE
+		m.Type = KEEPALIVE
 		return nil
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return err
 	}
-	p.Type = MessageType(payload[0])
+	m.Type = MessageType(payload[0])
 	payload = payload[1:]
-	switch p.Type {
+	switch m.Type {
 	case CHOKE, UNCHOKE, INTERESTED, NOT_INTERESTED:
 	case BITFIELD:
-		p.Bitfield = payload
+		m.Bitfield = payload
 	case HAVE:
-		p.Index = int(binary.BigEndian.Uint32(payload[0:4]))
+		m.Index = int(binary.BigEndian.Uint32(payload[0:4]))
 	case REQUEST, CANCEL:
-		p.Index = int(binary.BigEndian.Uint32(payload[0:4]))
-		p.Begin = int(binary.BigEndian.Uint32(payload[4:8]))
-		p.Length = int(binary.BigEndian.Uint32(payload[8:12]))
+		m.Index = int(binary.BigEndian.Uint32(payload[0:4]))
+		m.Begin = int(binary.BigEndian.Uint32(payload[4:8]))
+		m.Length = int(binary.BigEndian.Uint32(payload[8:12]))
 	case PIECE:
-		p.Index = int(binary.BigEndian.Uint32(payload[0:4]))
-		p.Begin = int(binary.BigEndian.Uint32(payload[4:8]))
-		p.Piece = payload[8:]
+		m.Index = int(binary.BigEndian.Uint32(payload[0:4]))
+		m.Begin = int(binary.BigEndian.Uint32(payload[4:8]))
+		m.Piece = payload[8:]
 	}
 	return nil
 }
 
-func (p *Message) UnmarshalBinary(data []byte) error {
-	return p.Decode(bytes.NewReader(data))
+func (m *Message) UnmarshalBinary(data []byte) error {
+	return m.Decode(bytes.NewReader(data))
 }
