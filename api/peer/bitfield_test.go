@@ -21,7 +21,7 @@ func TestBitfield_Get(t *testing.T) {
 		{
 			"does not contain",
 			Bitfield{0b10101010, 0b11001100},
-			[]int{1, 3, 5, 7, 10, 11, 14, 15},
+			[]int{1, 3, 5, 7, 10, 11, 14, 15, 16, 32},
 			false,
 		},
 	}

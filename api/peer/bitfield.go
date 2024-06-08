@@ -6,6 +6,9 @@ type Bitfield []byte
 
 func (b *Bitfield) Get(i int) bool {
 	bi := i / 8
+	if bi >= len(*b) {
+		return false
+	}
 	bj := 7 - (i % 8)
 	return (*b)[bi]&(1<<bj) != 0
 }
