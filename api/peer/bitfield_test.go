@@ -60,3 +60,24 @@ func TestBitfield_Set(t *testing.T) {
 		})
 	}
 }
+
+func TestBitfield_All(t *testing.T) {
+	tests := []struct {
+		name string
+		b    Bitfield
+		want []int
+	}{
+		{
+			"all",
+			Bitfield{0b10101010, 0b11001100},
+			[]int{0, 2, 4, 6, 8, 9, 12, 13},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.b.All(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Bitfield.All() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
