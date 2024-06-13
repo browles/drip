@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+
+	"github.com/browles/drip/bitfield"
 )
 
 func TestHandshake_MarshalBinary(t *testing.T) {
@@ -147,7 +149,7 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			"bitfield",
 			&Message{
 				Type:     BITFIELD,
-				bitfield: Bitfield{0b01010101, 0b11001100},
+				bitfield: bitfield.Bitfield{0b01010101, 0b11001100},
 			},
 			[]byte{0, 0, 0, 3, 5, 0b01010101, 0b11001100},
 			false,
@@ -277,7 +279,7 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 			[]byte{0, 0, 0, 3, 5, 0b01010101, 0b11001100},
 			&Message{
 				Type:     BITFIELD,
-				bitfield: Bitfield{0b01010101, 0b11001100},
+				bitfield: bitfield.Bitfield{0b01010101, 0b11001100},
 			},
 			false,
 		},

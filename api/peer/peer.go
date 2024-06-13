@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/browles/drip/bitfield"
 )
 
 func ReadHandshake(r io.Reader) (*Handshake, error) {
@@ -106,14 +108,85 @@ const (
 
 type Message struct {
 	Type     MessageType
-	bitfield Bitfield
+	bitfield bitfield.Bitfield
 	index    int
 	begin    int
 	length   int
 	piece    []byte
 }
 
-func (m *Message) Bitfield() Bitfield {
+func Keepalive() *Message {
+	return &Message{
+		Type: KEEPALIVE,
+	}
+}
+
+func Choke() *Message {
+	return &Message{
+		Type: CHOKE,
+	}
+}
+
+func Unchoke() *Message {
+	return &Message{
+		Type: UNCHOKE,
+	}
+}
+
+func Interested() *Message {
+	return &Message{
+		Type: INTERESTED,
+	}
+}
+
+func NotInterested() *Message {
+	return &Message{
+		Type: NOT_INTERESTED,
+	}
+}
+
+func Have(index int) *Message {
+	return &Message{
+		Type:  HAVE,
+		index: index,
+	}
+}
+
+func Bitfield(b bitfield.Bitfield) *Message {
+	return &Message{
+		Type:     BITFIELD,
+		bitfield: b,
+	}
+}
+
+func Request(index, begin, length int) *Message {
+	return &Message{
+		Type:   REQUEST,
+		index:  index,
+		begin:  begin,
+		length: length,
+	}
+}
+
+func Piece(index, begin int, piece []byte) *Message {
+	return &Message{
+		Type:  PIECE,
+		index: index,
+		begin: begin,
+		piece: piece,
+	}
+}
+
+func Cancel(index, begin, length int) *Message {
+	return &Message{
+		Type:   CANCEL,
+		index:  index,
+		begin:  begin,
+		length: length,
+	}
+}
+
+func (m *Message) Bitfield() bitfield.Bitfield {
 	switch m.Type {
 	case BITFIELD:
 		return m.bitfield
