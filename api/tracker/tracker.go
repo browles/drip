@@ -151,9 +151,9 @@ func parsePeers(peerMaps []any) ([]*Peer, error) {
 	for _, m := range peerMaps {
 		m := m.(map[string]any)
 		peer := &Peer{
-			PeerID: m["peer id"].(string),
-			IP:     m["ip"].(string),
-			Port:   m["port"].(int),
+			ID:   m["peer id"].(string),
+			IP:   m["ip"].(string),
+			Port: m["port"].(int),
 		}
 		peers = append(peers, peer)
 	}
@@ -161,7 +161,7 @@ func parsePeers(peerMaps []any) ([]*Peer, error) {
 }
 
 type Peer struct {
-	PeerID string `bencode:"peer id"`
-	IP     string `bencode:"ip"`
-	Port   int    `bencode:"port"`
+	ID   string `bencode:"peer id"`
+	IP   string `bencode:"ip"`
+	Port int    `bencode:"port"`
 }

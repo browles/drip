@@ -106,11 +106,56 @@ const (
 
 type Message struct {
 	Type     MessageType
-	Bitfield Bitfield
-	Index    int
-	Begin    int
-	Length   int
-	Piece    []byte
+	bitfield Bitfield
+	index    int
+	begin    int
+	length   int
+	piece    []byte
+}
+
+func (m *Message) Bitfield() Bitfield {
+	switch m.Type {
+	case BITFIELD:
+		return m.bitfield
+	default:
+		panic("Bitfield() on invalid message type")
+	}
+}
+
+func (m *Message) Index() int {
+	switch m.Type {
+	case HAVE, REQUEST, CANCEL, PIECE:
+		return m.index
+	default:
+		panic("Index() on invalid message type")
+	}
+}
+
+func (m *Message) Begin() int {
+	switch m.Type {
+	case REQUEST, CANCEL:
+		return m.begin
+	default:
+		panic("Begin() on invalid message type")
+	}
+}
+
+func (m *Message) Length() int {
+	switch m.Type {
+	case REQUEST, CANCEL:
+		return m.length
+	default:
+		panic("Length() on invalid message type")
+	}
+}
+
+func (m *Message) Piece() []byte {
+	switch m.Type {
+	case PIECE:
+		return m.piece
+	default:
+		panic("Piece() on invalid message type")
+	}
 }
 
 func (m *Message) Encode(w io.Writer) error {
@@ -124,28 +169,28 @@ func (m *Message) Encode(w io.Writer) error {
 		fixedData[4] = byte(m.Type)
 	case BITFIELD:
 		fixedData = make([]byte, 4+1)
-		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+len(m.Bitfield)))
+		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+len(m.bitfield)))
 		fixedData[4] = byte(m.Type)
-		variableData = m.Bitfield
+		variableData = m.bitfield
 	case HAVE:
 		fixedData = make([]byte, 4+1+4)
 		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+4))
 		fixedData[4] = byte(m.Type)
-		binary.BigEndian.PutUint32(fixedData[5:9], uint32(m.Index))
+		binary.BigEndian.PutUint32(fixedData[5:9], uint32(m.index))
 	case REQUEST, CANCEL:
 		fixedData = make([]byte, 4+1+12)
 		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+12))
 		fixedData[4] = byte(m.Type)
-		binary.BigEndian.PutUint32(fixedData[5:9], uint32(m.Index))
-		binary.BigEndian.PutUint32(fixedData[9:13], uint32(m.Begin))
-		binary.BigEndian.PutUint32(fixedData[13:17], uint32(m.Length))
+		binary.BigEndian.PutUint32(fixedData[5:9], uint32(m.index))
+		binary.BigEndian.PutUint32(fixedData[9:13], uint32(m.begin))
+		binary.BigEndian.PutUint32(fixedData[13:17], uint32(m.length))
 	case PIECE:
 		fixedData = make([]byte, 4+1+8)
-		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+8+len(m.Piece)))
+		binary.BigEndian.PutUint32(fixedData[0:4], uint32(1+8+len(m.piece)))
 		fixedData[4] = byte(m.Type)
-		binary.BigEndian.PutUint32(fixedData[5:9], uint32(m.Index))
-		binary.BigEndian.PutUint32(fixedData[9:13], uint32(m.Begin))
-		variableData = m.Piece
+		binary.BigEndian.PutUint32(fixedData[5:9], uint32(m.index))
+		binary.BigEndian.PutUint32(fixedData[9:13], uint32(m.begin))
+		variableData = m.piece
 	}
 	if _, err := w.Write(fixedData); err != nil {
 		return err
@@ -184,17 +229,17 @@ func (m *Message) Decode(r io.Reader) error {
 	switch m.Type {
 	case CHOKE, UNCHOKE, INTERESTED, NOT_INTERESTED:
 	case BITFIELD:
-		m.Bitfield = payload
+		m.bitfield = payload
 	case HAVE:
-		m.Index = int(binary.BigEndian.Uint32(payload[0:4]))
+		m.index = int(binary.BigEndian.Uint32(payload[0:4]))
 	case REQUEST, CANCEL:
-		m.Index = int(binary.BigEndian.Uint32(payload[0:4]))
-		m.Begin = int(binary.BigEndian.Uint32(payload[4:8]))
-		m.Length = int(binary.BigEndian.Uint32(payload[8:12]))
+		m.index = int(binary.BigEndian.Uint32(payload[0:4]))
+		m.begin = int(binary.BigEndian.Uint32(payload[4:8]))
+		m.length = int(binary.BigEndian.Uint32(payload[8:12]))
 	case PIECE:
-		m.Index = int(binary.BigEndian.Uint32(payload[0:4]))
-		m.Begin = int(binary.BigEndian.Uint32(payload[4:8]))
-		m.Piece = payload[8:]
+		m.index = int(binary.BigEndian.Uint32(payload[0:4]))
+		m.begin = int(binary.BigEndian.Uint32(payload[4:8]))
+		m.piece = payload[8:]
 	}
 	return nil
 }

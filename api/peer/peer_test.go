@@ -138,7 +138,7 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			"have",
 			&Message{
 				Type:  HAVE,
-				Index: 0x01020304,
+				index: 0x01020304,
 			},
 			[]byte{0, 0, 0, 5, 4, 0x01, 0x02, 0x03, 0x04},
 			false,
@@ -147,7 +147,7 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			"bitfield",
 			&Message{
 				Type:     BITFIELD,
-				Bitfield: Bitfield{0b01010101, 0b11001100},
+				bitfield: Bitfield{0b01010101, 0b11001100},
 			},
 			[]byte{0, 0, 0, 3, 5, 0b01010101, 0b11001100},
 			false,
@@ -156,9 +156,9 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			"request",
 			&Message{
 				Type:   REQUEST,
-				Index:  0x01020304,
-				Begin:  0x11223344,
-				Length: 0x55667788,
+				index:  0x01020304,
+				begin:  0x11223344,
+				length: 0x55667788,
 			},
 			[]byte{
 				0, 0, 0, 13, 6,
@@ -172,9 +172,9 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			"piece",
 			&Message{
 				Type:  PIECE,
-				Index: 0x01020304,
-				Begin: 0x11223344,
-				Piece: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9},
+				index: 0x01020304,
+				begin: 0x11223344,
+				piece: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9},
 			},
 			[]byte{
 				0, 0, 0, 18, 7,
@@ -189,9 +189,9 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			"cancel",
 			&Message{
 				Type:   CANCEL,
-				Index:  0x01020304,
-				Begin:  0x11223344,
-				Length: 0x55667788,
+				index:  0x01020304,
+				begin:  0x11223344,
+				length: 0x55667788,
 			},
 			[]byte{
 				0, 0, 0, 13, 8,
@@ -268,7 +268,7 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 			[]byte{0, 0, 0, 5, 4, 0x01, 0x02, 0x03, 0x04},
 			&Message{
 				Type:  HAVE,
-				Index: 0x01020304,
+				index: 0x01020304,
 			},
 			false,
 		},
@@ -277,7 +277,7 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 			[]byte{0, 0, 0, 3, 5, 0b01010101, 0b11001100},
 			&Message{
 				Type:     BITFIELD,
-				Bitfield: Bitfield{0b01010101, 0b11001100},
+				bitfield: Bitfield{0b01010101, 0b11001100},
 			},
 			false,
 		},
@@ -291,9 +291,9 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 			},
 			&Message{
 				Type:   REQUEST,
-				Index:  0x01020304,
-				Begin:  0x11223344,
-				Length: 0x55667788,
+				index:  0x01020304,
+				begin:  0x11223344,
+				length: 0x55667788,
 			},
 			false,
 		},
@@ -307,9 +307,9 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 			},
 			&Message{
 				Type:  PIECE,
-				Index: 0x01020304,
-				Begin: 0x11223344,
-				Piece: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9},
+				index: 0x01020304,
+				begin: 0x11223344,
+				piece: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9},
 			},
 			false,
 		},
@@ -324,9 +324,9 @@ func TestMessage_UnmarshalBinary(t *testing.T) {
 			},
 			&Message{
 				Type:   CANCEL,
-				Index:  0x01020304,
-				Begin:  0x11223344,
-				Length: 0x55667788,
+				index:  0x01020304,
+				begin:  0x11223344,
+				length: 0x55667788,
 			},
 
 			false,
