@@ -4,7 +4,7 @@ import "slices"
 
 type Bitfield []byte
 
-func (b *Bitfield) Get(i int) bool {
+func (b *Bitfield) Has(i int) bool {
 	bi := i / 8
 	if bi >= len(*b) {
 		return false
@@ -13,7 +13,7 @@ func (b *Bitfield) Get(i int) bool {
 	return (*b)[bi]&(1<<bj) != 0
 }
 
-func (b *Bitfield) Set(i int) {
+func (b *Bitfield) Add(i int) {
 	bi := i / 8
 	if bi >= len(*b) {
 		*b = slices.Grow(*b, 1+bi-len(*b))
@@ -23,7 +23,7 @@ func (b *Bitfield) Set(i int) {
 	(*b)[bi] |= 1 << bj
 }
 
-func (b *Bitfield) All() []int {
+func (b *Bitfield) Items() []int {
 	var res []int
 	for bi, mask := range *b {
 		for j := range 8 {

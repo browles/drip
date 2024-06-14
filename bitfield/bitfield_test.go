@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestBitfield_Get(t *testing.T) {
+func TestBitfield_Has(t *testing.T) {
 	tests := []struct {
 		name string
 		b    Bitfield
@@ -28,15 +28,15 @@ func TestBitfield_Get(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, i := range tt.i {
-				if got := tt.b.Get(i); got != tt.want {
-					t.Errorf("Bitfield.Get() = %v, want %v", got, tt.want)
+				if got := tt.b.Has(i); got != tt.want {
+					t.Errorf("Bitfield.Has() = %v, want %v", got, tt.want)
 				}
 			}
 		})
 	}
 }
 
-func TestBitfield_Set(t *testing.T) {
+func TestBitfield_Add(t *testing.T) {
 	tests := []struct {
 		name string
 		i    []int
@@ -52,16 +52,16 @@ func TestBitfield_Set(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			b := Bitfield{}
 			for _, i := range tt.i {
-				b.Set(i)
+				b.Add(i)
 			}
 			if !reflect.DeepEqual(b, tt.want) {
-				t.Errorf("Bitfield.Set() = %v, want %v", b, tt.want)
+				t.Errorf("Bitfield.Add() = %v, want %v", b, tt.want)
 			}
 		})
 	}
 }
 
-func TestBitfield_All(t *testing.T) {
+func TestBitfield_Items(t *testing.T) {
 	tests := []struct {
 		name string
 		b    Bitfield
@@ -75,8 +75,8 @@ func TestBitfield_All(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.b.All(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Bitfield.All() = %v, want %v", got, tt.want)
+			if got := tt.b.Items(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Bitfield.Items() = %v, want %v", got, tt.want)
 			}
 		})
 	}
