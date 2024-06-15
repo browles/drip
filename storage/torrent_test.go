@@ -29,7 +29,7 @@ func TestTorrent_createPiece(t *testing.T) {
 			Pieces:      [][20]byte{{1: 1}, {2: 2}, {3: 3}, {4: 4}},
 		},
 	}
-	pieceBlockAlignedShort := &Torrent{
+	pieceBlockMisaligned := &Torrent{
 		Info: &metainfo.Info{
 			Length:      4 * 3 * BLOCK_LENGTH / 2,
 			PieceLength: 3 * BLOCK_LENGTH / 2,
@@ -83,7 +83,7 @@ func TestTorrent_createPiece(t *testing.T) {
 			},
 		},
 		{
-			"piece block misaligned", pieceBlockAlignedShort, 0,
+			"piece block misaligned", pieceBlockMisaligned, 0,
 			&Piece{
 				SHA1:      [20]byte{1: 1},
 				Index:     0,
@@ -91,7 +91,7 @@ func TestTorrent_createPiece(t *testing.T) {
 			},
 		},
 		{
-			"pice block misaligned last", pieceBlockAlignedShort, 3,
+			"piece block misaligned last", pieceBlockMisaligned, 3,
 			&Piece{
 				SHA1:      [20]byte{4: 4},
 				Index:     3,

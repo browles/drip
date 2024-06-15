@@ -107,7 +107,7 @@ func (ma *Manager) RequestPiece(ctx context.Context, peer *Peer, index int) erro
 	}
 	begin := 0
 	for begin < pieceLength {
-		blockLength := min(ma.Storage.BlockLength, pieceLength-begin)
+		blockLength := min(storage.BLOCK_LENGTH, pieceLength-begin)
 		ma.OutgoingRequests <- &blockRequest{peer, index, begin, blockLength}
 		begin += blockLength
 	}
