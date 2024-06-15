@@ -15,7 +15,7 @@ import (
 	"github.com/browles/drip/api/metainfo"
 )
 
-const BLOCK_LENGTH = 1 << 16
+const BLOCK_LENGTH = 1 << 14
 
 type Storage struct {
 	TargetDir string
@@ -245,6 +245,7 @@ func (s *Storage) coalesceBlocks(torrent *Torrent, piece *Piece) error {
 	if err != nil {
 		return err
 	}
+	defer os.Remove(temp.Name())
 	defer temp.Close()
 	sha1Digest := sha1.New()
 	var blockReaders []io.Reader
@@ -283,6 +284,7 @@ func (s *Storage) coalescePiecesForSingleFile(torrent *Torrent) error {
 	if err != nil {
 		return err
 	}
+	defer os.Remove(temp.Name())
 	defer temp.Close()
 	var pieceReaders []io.Reader
 	for _, piece := range torrent.pieces {
@@ -308,6 +310,7 @@ func (s *Storage) coalescePiecesForMultiFiles(torrent *Torrent) error {
 	if err != nil {
 		return err
 	}
+	defer os.RemoveAll(temp)
 	var pieceReaders []io.Reader
 	for _, piece := range torrent.pieces {
 		path := path.Join(s.WorkDir, torrent.WorkDir(), piece.FileName())
