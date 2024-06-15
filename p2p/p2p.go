@@ -142,7 +142,7 @@ func (ma *Manager) Connect(ctx context.Context, p *tracker.Peer) error {
 	}
 	ma.ActivePeers[peer.ID] = peer
 	torrent := ma.Storage.GetTorrent(ma.Info.SHA1)
-	if err := peer.Send(api.Bitfield(torrent.Bitfield)); err != nil {
+	if err := peer.Send(api.Bitfield(torrent.Bitfield())); err != nil {
 		return err
 	}
 	for {
