@@ -62,14 +62,14 @@ func TestPeers_MarshalBencoding(t *testing.T) {
 				Compact: true,
 				List: []*Peer{
 					{
-						PeerID: "abc",
-						IP:     "1.2.3.4",
-						Port:   5678,
+						ID:   "abc",
+						IP:   "1.2.3.4",
+						Port: 5678,
 					},
 					{
-						PeerID: "def",
-						IP:     "2.3.4.1",
-						Port:   6785,
+						ID:   "def",
+						IP:   "2.3.4.1",
+						Port: 6785,
 					},
 				},
 			},
@@ -82,14 +82,14 @@ func TestPeers_MarshalBencoding(t *testing.T) {
 				Compact: false,
 				List: []*Peer{
 					{
-						PeerID: "abc",
-						IP:     "1.2.3.4",
-						Port:   5678,
+						ID:   "abc",
+						IP:   "1.2.3.4",
+						Port: 5678,
 					},
 					{
-						PeerID: "def",
-						IP:     "2.3.4.1",
-						Port:   6785,
+						ID:   "def",
+						IP:   "2.3.4.1",
+						Port: 6785,
 					},
 				},
 			},
@@ -143,14 +143,14 @@ func TestPeers_UnmarshalBencoding(t *testing.T) {
 				Compact: false,
 				List: []*Peer{
 					{
-						PeerID: "abc",
-						IP:     "1.2.3.4",
-						Port:   5678,
+						ID:   "abc",
+						IP:   "1.2.3.4",
+						Port: 5678,
 					},
 					{
-						PeerID: "def",
-						IP:     "2.3.4.1",
-						Port:   6785,
+						ID:   "def",
+						IP:   "2.3.4.1",
+						Port: 6785,
 					},
 				},
 			},
@@ -159,14 +159,14 @@ func TestPeers_UnmarshalBencoding(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := Peers{}
+			p := &Peers{}
 			err := p.UnmarshalBencoding([]byte(tt.data))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Peers.UnmarshalBencoding() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(p, tt.want) {
-				t.Errorf("Peers.UnmarshalBencoding() = %v, want %v", p, tt.want)
+				t.Errorf("Peers.UnmarshalBencoding() = %+v, want %+v", p, tt.want)
 			}
 		})
 	}

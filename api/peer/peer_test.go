@@ -10,8 +10,8 @@ import (
 
 func TestHandshake_MarshalBinary(t *testing.T) {
 	testHandshake := &Handshake{
-		InfoHash: [20]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		PeerID:   [20]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		InfoHash: [20]byte{},
+		PeerID:   [20]byte{},
 	}
 	copy(testHandshake.InfoHash[:], []byte("SHA1-HASH-abcdefghij"))
 	copy(testHandshake.PeerID[:], []byte("-DR1000-123456789012"))
@@ -50,8 +50,8 @@ func TestHandshake_MarshalBinary(t *testing.T) {
 
 func TestHandshake_UnmarshalBinary(t *testing.T) {
 	testHandshake := &Handshake{
-		InfoHash: [20]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		PeerID:   [20]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		InfoHash: [20]byte{},
+		PeerID:   [20]byte{},
 	}
 	copy(testHandshake.InfoHash[:], []byte("SHA1-HASH-abcdefghij"))
 	copy(testHandshake.PeerID[:], []byte("-DR1000-123456789012"))
