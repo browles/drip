@@ -148,7 +148,7 @@ func (s *Storage) PutBlock(infoHash [20]byte, index, begin int, data []byte) err
 
 func (s *Storage) getBlockFromTorrent(torrent *Torrent, index, begin, length int) ([]byte, error) {
 	if len(torrent.Info.Files) > 0 {
-		return s.getBlockFromMultiFiles(torrent, index, begin, length)
+		return s.getBlockFromMultiFile(torrent, index, begin, length)
 	}
 	return s.getBlockFromSingleFile(torrent, index, begin, length)
 }
@@ -172,7 +172,7 @@ func (s *Storage) getBlockFromSingleFile(torrent *Torrent, index, begin, length 
 	return data, nil
 }
 
-func (s *Storage) getBlockFromMultiFiles(torrent *Torrent, index, begin, length int) ([]byte, error) {
+func (s *Storage) getBlockFromMultiFile(torrent *Torrent, index, begin, length int) ([]byte, error) {
 	curr := 0
 	data := make([]byte, length)
 	total := 0
@@ -194,7 +194,7 @@ func (s *Storage) getBlockFromMultiFiles(torrent *Torrent, index, begin, length 
 			}
 			n, err := f.ReadAt(data[curr:], int64(offset))
 			curr += n
-			if err != nil {
+			if err != nil && !errors.Is(err, io.EOF) {
 				return nil, err
 			}
 			f.Close()
@@ -285,16 +285,16 @@ func (s *Storage) coalesceBlocks(torrent *Torrent, piece *Piece) error {
 }
 
 func (s *Storage) coalescePieces(torrent *Torrent) error {
+	if torrent.completePieces != len(torrent.pieces) {
+		return nil
+	}
 	if len(torrent.Info.Files) > 0 {
-		return s.coalescePiecesForMultiFiles(torrent)
+		return s.coalescePiecesForMultiFile(torrent)
 	}
 	return s.coalescePiecesForSingleFile(torrent)
 }
 
 func (s *Storage) coalescePiecesForSingleFile(torrent *Torrent) error {
-	if torrent.completePieces != len(torrent.pieces) {
-		return nil
-	}
 	temp, err := os.CreateTemp(s.TempDir, torrent.FileName())
 	if err != nil {
 		return err
@@ -320,7 +320,7 @@ func (s *Storage) coalescePiecesForSingleFile(torrent *Torrent) error {
 	return nil
 }
 
-func (s *Storage) coalescePiecesForMultiFiles(torrent *Torrent) error {
+func (s *Storage) coalescePiecesForMultiFile(torrent *Torrent) error {
 	temp, err := os.MkdirTemp(s.TempDir, torrent.FileName())
 	if err != nil {
 		return err

@@ -107,7 +107,7 @@ func TestSingleFileIntegration(t *testing.T) {
 		t.Fatal("want: coalesced piece")
 	}
 	if _, err = os.Stat(path.Join(workDir, torrent.WorkDir(), "0.piece")); err != nil {
-		t.Fatal("want: coalesced piece on disk")
+		t.Fatalf("want: coalesced piece on disk: %s", err)
 	}
 	data, err := storage.GetBlock(info.SHA1, 0, 0, BLOCK_LENGTH)
 	if err != nil {
@@ -127,17 +127,105 @@ func TestSingleFileIntegration(t *testing.T) {
 	if !torrent.coalesced {
 		t.Fatal("want: coalesced torrent")
 	}
-	if _, err = os.Stat(path.Join(targetDir, torrent.FileName())); err != nil {
-		t.Fatal("want: coalesced torrent on disk")
+	stat, err := os.Stat(path.Join(targetDir, torrent.FileName()))
+	if err != nil {
+		t.Fatalf("want: coalesced torrent on disk: %s", err)
+	}
+	if stat.Size() != int64(info.Length) {
+		t.Fatalf("want: coalesced torrent size on disk: %d != %d", stat.Size(), info.Length)
 	}
 	if files, err := os.ReadDir(path.Join(workDir, torrent.WorkDir())); err == nil || len(files) > 0 {
-		t.Fatal("want: cleaned up pieces on disk")
+		t.Error("want: cleaned up pieces on disk")
 	}
-	data, err = storage.GetBlock(info.SHA1, 3, BLOCK_LENGTH, BLOCK_LENGTH-1000)
+	checkBlock := func(index, begin, length int) {
+		data, err := storage.GetBlock(info.SHA1, index, begin, length)
+		if err != nil {
+			t.Fatalf("want: block data from torrent, index=%d begin=%d length=%d: %s", index, begin, length, err)
+		}
+		want := pieces[index][begin : begin+length]
+		if !reflect.DeepEqual(data, want) {
+			t.Errorf("want: correct block data from torrent, index=%d begin=%d length=%d", index, begin, length)
+		}
+	}
+	for i := 0; i < len(pieces); i++ {
+		checkBlock(i, 0, BLOCK_LENGTH)
+		checkBlock(i, BLOCK_LENGTH, len(pieces[i])-BLOCK_LENGTH)
+	}
+}
+
+func TestMultiFileIntegration(t *testing.T) {
+	targetDir := t.TempDir()
+	workDir := t.TempDir()
+	tempDir := t.TempDir()
+	storage := New(targetDir, workDir, tempDir)
+	pieces := [][]byte{
+		randomBytes(t, 2*BLOCK_LENGTH),
+		randomBytes(t, 2*BLOCK_LENGTH),
+		randomBytes(t, 2*BLOCK_LENGTH),
+		randomBytes(t, 2*BLOCK_LENGTH-1000),
+	}
+	sha1s := make([][20]byte, len(pieces))
+	total := 0
+	for i := range pieces {
+		sha1s[i] = sha1.Sum(pieces[i])
+		total += len(pieces[i])
+	}
+	info := &metainfo.Info{
+		SHA1:        [20]byte{1: 1, 2: 2, 3: 3, 4: 4, 5: 5},
+		PieceLength: 2 * BLOCK_LENGTH,
+		Pieces:      sha1s,
+		Name:        "output_dir",
+		Length:      total,
+		Files: []*metainfo.File{
+			{Length: (3 * BLOCK_LENGTH) / 2, Path: []string{"a.txt"}},
+			{Length: 2 * BLOCK_LENGTH, Path: []string{"b", "b.txt"}},
+			{Length: total - 2*BLOCK_LENGTH - (3*BLOCK_LENGTH)/2, Path: []string{"b", "c", "c.txt"}},
+		},
+	}
+	err := storage.AddTorrent(info)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(data, pieces[3][BLOCK_LENGTH:]) {
-		t.Fatal("want: correct block data from torrent")
+	torrent := storage.GetTorrent(info.SHA1)
+	for i := 0; i < len(pieces); i++ {
+		if err = storage.PutBlock(info.SHA1, i, 0, pieces[i][:BLOCK_LENGTH]); err != nil {
+			t.Fatal(err)
+		}
+		if err = storage.PutBlock(info.SHA1, i, BLOCK_LENGTH, pieces[i][BLOCK_LENGTH:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !torrent.coalesced {
+		t.Fatal("want: coalesced torrent")
+	}
+	if _, err = os.Stat(path.Join(targetDir, torrent.FileName())); err != nil {
+		t.Fatal("want: coalesced torrent on disk")
+	}
+	for _, file := range info.Files {
+		filepath := append([]string{targetDir, torrent.FileName()}, file.Path...)
+		stat, err := os.Stat(path.Join(filepath...))
+		if err != nil {
+			t.Fatalf("want: coalesced torrent file on disk: %v", file.Path)
+		}
+		if stat.Size() != int64(file.Length) {
+			t.Fatalf("want: coalesced torrent file size on disk: %d != %d", stat.Size(), file.Length)
+		}
+	}
+	if files, err := os.ReadDir(path.Join(workDir, torrent.WorkDir())); err == nil || len(files) > 0 {
+		t.Error("want: cleaned up pieces on disk")
+	}
+	checkBlock := func(index, begin, length int) {
+		data, err := storage.GetBlock(info.SHA1, index, begin, length)
+		if err != nil {
+			t.Fatalf("want: block data from torrent, index=%d begin=%d length=%d: %s", index, begin, length, err)
+		}
+		want := pieces[index][begin : begin+length]
+		if !reflect.DeepEqual(data, want) {
+			t.Errorf("want: correct block data from torrent, index=%d begin=%d length=%d", index, begin, length)
+		}
+	}
+	for i := 0; i < len(pieces); i++ {
+		checkBlock(i, 0, BLOCK_LENGTH)
+		checkBlock(i, BLOCK_LENGTH, len(pieces[i])-BLOCK_LENGTH)
 	}
 }
