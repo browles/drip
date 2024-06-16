@@ -45,27 +45,29 @@ func (s *Storage) AddTorrent(info *metainfo.Info) error {
 		return err
 	}
 	if err == nil {
+		// Complete torrent exists on disk
 		for i := range len(torrent.Info.Pieces) {
 			torrent.completePiece(torrent.pieces[i])
 		}
 		torrent.complete()
-		return nil
-	}
-	direntries, err := os.ReadDir(filepath.Join(s.WorkDir, torrent.WorkDir()))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err == nil {
-		for _, dr := range direntries {
-			var i int
-			_, err := fmt.Sscanf(dr.Name(), "%d.piece", &i)
-			if err != nil {
-				continue
-			}
-			torrent.completePiece(torrent.pieces[i])
-		}
-		if err = s.coalescePieces(torrent); err != nil {
+	} else {
+		// Check for complete pieces on disk
+		direntries, err := os.ReadDir(filepath.Join(s.WorkDir, torrent.WorkDir()))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
+		}
+		if err == nil {
+			for _, dr := range direntries {
+				var i int
+				_, err := fmt.Sscanf(dr.Name(), "%d.piece", &i)
+				if err != nil {
+					continue
+				}
+				torrent.completePiece(torrent.pieces[i])
+			}
+			if err = s.coalescePieces(torrent); err != nil {
+				return err
+			}
 		}
 	}
 	s.torrents[info.SHA1] = torrent
@@ -88,9 +90,6 @@ func (s *Storage) GetPiece(infoHash [20]byte, index int) *Piece {
 
 func (s *Storage) GetBlock(infoHash [20]byte, index, begin, length int) ([]byte, error) {
 	torrent := s.GetTorrent(infoHash)
-	if err := checkBlockSize(torrent.Info, index, begin, length); err != nil {
-		return nil, err
-	}
 	torrent.mu.RLock()
 	defer torrent.mu.RUnlock()
 	if torrent.coalesced {
@@ -119,22 +118,7 @@ func (s *Storage) PutBlock(infoHash [20]byte, index, begin int, data []byte) err
 	piece := torrent.pieces[index]
 	piece.mu.Lock()
 	defer piece.mu.Unlock()
-	if piece.coalesced {
-		return nil
-	}
-	if piece.blocks == nil {
-		piece.blocks = make([]*block, piece.numBlocks)
-	}
-	if piece.blocks[begin/BLOCK_LENGTH] != nil {
-		return nil
-	}
-	block := &block{
-		index: index,
-		begin: begin,
-		data:  data,
-	}
-	piece.blocks[block.begin/BLOCK_LENGTH] = block
-	piece.completeBlocks++
+	piece.putBlock(begin, data)
 	torrent.mu.Lock()
 	defer torrent.mu.Unlock()
 	if err := s.coalesceBlocks(torrent, piece); err != nil {

@@ -71,9 +71,7 @@ func (p *Piece) Err() error {
 func (p *Piece) Reset() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.completeBlocks = 0
-	p.blocks = nil
-	p.err = nil
+	p.reset()
 }
 
 type block struct {
@@ -112,8 +110,8 @@ func newPiece(info *metainfo.Info, index int) *Piece {
 }
 
 func (t *Torrent) completePiece(piece *Piece) {
+	piece.reset()
 	piece.coalesced = true
-	piece.blocks = nil
 	close(piece.Done)
 	t.bitfield.Add(piece.Index)
 	t.completePieces++
@@ -122,4 +120,29 @@ func (t *Torrent) completePiece(piece *Piece) {
 func (t *Torrent) complete() {
 	t.coalesced = true
 	close(t.Done)
+}
+
+func (p *Piece) putBlock(begin int, data []byte) {
+	if p.coalesced {
+		return
+	}
+	if p.blocks == nil {
+		p.blocks = make([]*block, p.numBlocks)
+	}
+	if p.blocks[begin/BLOCK_LENGTH] != nil {
+		return
+	}
+	block := &block{
+		index: p.Index,
+		begin: begin,
+		data:  data,
+	}
+	p.blocks[block.begin/BLOCK_LENGTH] = block
+	p.completeBlocks++
+}
+
+func (p *Piece) reset() {
+	p.err = nil
+	p.blocks = nil
+	p.completeBlocks = 0
 }
