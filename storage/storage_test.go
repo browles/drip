@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/browles/drip/api/metainfo"
 )
@@ -53,6 +55,7 @@ func TestIntegrationReloadingPartialTorrents(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	t.Parallel()
 	targetDir := t.TempDir()
 	workDir := t.TempDir()
 	tempDir := t.TempDir()
@@ -129,7 +132,7 @@ func TestIntegrationReloadingPartialTorrents(t *testing.T) {
 	if storage.GetPiece(info.SHA1, 1).coalesced {
 		t.Fatal("want: non-coalesced piece")
 	}
-	// Put rest of pieces (without trigger torrent coalesce)
+	// Put rest of pieces (without triggering torrent coalesce)
 	for i := 1; i < len(pieces); i++ {
 		piece := torrent.pieces[i]
 		piece.putBlock(0, pieces[i][:BLOCK_LENGTH])
@@ -144,7 +147,7 @@ func TestIntegrationReloadingPartialTorrents(t *testing.T) {
 			t.Fatalf("want: coalesced piece: %d", i)
 		}
 	}
-	// Reload and coalesce complete but non-coalesced torrent
+	// Reload and coalesce non-coalesced torrent with complete pieces
 	delete(storage.torrents, info.SHA1)
 	err = storage.AddTorrent(info)
 	if err != nil {
@@ -186,6 +189,7 @@ func TestIntegrationSingleFileTorrent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	t.Parallel()
 	targetDir := t.TempDir()
 	workDir := t.TempDir()
 	tempDir := t.TempDir()
@@ -249,6 +253,7 @@ func TestIntegrationSingleFileTorrent(t *testing.T) {
 		checkBlock(i, 0, BLOCK_LENGTH)
 		checkBlock(i, BLOCK_LENGTH, len(pieces[i])-BLOCK_LENGTH)
 	}
+	// Allow GetBlocks with different block lengths
 	checkBlock(0, 0, 2*BLOCK_LENGTH)
 	checkBlock(0, 0, 3*BLOCK_LENGTH/2)
 }
@@ -330,5 +335,98 @@ func TestIntegrationMultiFileTorrent(t *testing.T) {
 	for i := 0; i < len(pieces); i++ {
 		checkBlock(i, 0, BLOCK_LENGTH)
 		checkBlock(i, BLOCK_LENGTH, len(pieces[i])-BLOCK_LENGTH)
+	}
+}
+
+func TestIntegrationConcurrentAccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	t.Parallel()
+	targetDir := t.TempDir()
+	workDir := t.TempDir()
+	tempDir := t.TempDir()
+	storage := New(targetDir, workDir, tempDir)
+	pieces := [][]byte{
+		randomBytes(t, 4*BLOCK_LENGTH),
+		randomBytes(t, 4*BLOCK_LENGTH),
+		randomBytes(t, 4*BLOCK_LENGTH),
+		randomBytes(t, 4*BLOCK_LENGTH),
+		randomBytes(t, 4*BLOCK_LENGTH),
+		randomBytes(t, 4*BLOCK_LENGTH),
+		randomBytes(t, 4*BLOCK_LENGTH),
+		randomBytes(t, 4*BLOCK_LENGTH-1000),
+	}
+	sha1s := make([][20]byte, len(pieces))
+	total := 0
+	for i := range pieces {
+		sha1s[i] = sha1.Sum(pieces[i])
+		total += len(pieces[i])
+	}
+	info := &metainfo.Info{
+		SHA1:        [20]byte{1: 1, 2: 2, 3: 3, 4: 4, 5: 5},
+		PieceLength: 4 * BLOCK_LENGTH,
+		Pieces:      sha1s,
+		Name:        "output_file.txt",
+		Length:      total,
+	}
+	err := storage.AddTorrent(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	torrent := storage.GetTorrent(info.SHA1)
+	checkBlock := func(index, begin, length int) {
+		data, err := storage.GetBlock(info.SHA1, index, begin, length)
+		if err != nil {
+			t.Errorf("want: block data from torrent, index=%d begin=%d length=%d: %s", index, begin, length, err)
+			return
+		}
+		want := pieces[index][begin : begin+length]
+		if !reflect.DeepEqual(data, want) {
+			t.Errorf("want: correct block data from torrent, index=%d begin=%d length=%d", index, begin, length)
+		}
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < len(pieces); i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for curr := 0; curr < len(pieces[i]); curr += BLOCK_LENGTH {
+				blockLength := min(BLOCK_LENGTH, len(pieces[i])-curr)
+				if err = storage.PutBlock(info.SHA1, i, curr, pieces[i][curr:curr+blockLength]); err != nil {
+					t.Error(err)
+				}
+			}
+			for curr := 0; curr < len(pieces[i]); curr += BLOCK_LENGTH {
+				blockLength := min(BLOCK_LENGTH, len(pieces[i])-curr)
+				checkBlock(i, curr, blockLength)
+			}
+		}(i)
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-time.NewTimer(5 * time.Second).C:
+		t.Fatal("test timeout (deadlock?)")
+	case <-done:
+	}
+	if t.Failed() {
+		t.Fatal("want: successful concurrent access")
+	}
+	if !torrent.coalesced {
+		t.Fatal("want: coalesced torrent")
+	}
+	stat, err := os.Stat(filepath.Join(targetDir, torrent.FileName()))
+	if err != nil {
+		t.Fatalf("want: coalesced torrent on disk: %s", err)
+	}
+	if stat.Size() != int64(info.Length) {
+		t.Fatalf("want: coalesced torrent size on disk: %d != %d", stat.Size(), info.Length)
+	}
+	if files, err := os.ReadDir(filepath.Join(workDir, torrent.WorkDir())); err == nil || len(files) > 0 {
+		t.Error("want: cleaned up pieces on disk")
 	}
 }
