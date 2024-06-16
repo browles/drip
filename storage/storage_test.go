@@ -4,7 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"os"
-	"path"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -106,7 +106,7 @@ func TestSingleFileIntegration(t *testing.T) {
 	if !piece.coalesced {
 		t.Fatal("want: coalesced piece")
 	}
-	if _, err = os.Stat(path.Join(workDir, torrent.WorkDir(), "0.piece")); err != nil {
+	if _, err = os.Stat(filepath.Join(workDir, torrent.WorkDir(), "0.piece")); err != nil {
 		t.Fatalf("want: coalesced piece on disk: %s", err)
 	}
 	data, err := storage.GetBlock(info.SHA1, 0, 0, BLOCK_LENGTH)
@@ -127,14 +127,14 @@ func TestSingleFileIntegration(t *testing.T) {
 	if !torrent.coalesced {
 		t.Fatal("want: coalesced torrent")
 	}
-	stat, err := os.Stat(path.Join(targetDir, torrent.FileName()))
+	stat, err := os.Stat(filepath.Join(targetDir, torrent.FileName()))
 	if err != nil {
 		t.Fatalf("want: coalesced torrent on disk: %s", err)
 	}
 	if stat.Size() != int64(info.Length) {
 		t.Fatalf("want: coalesced torrent size on disk: %d != %d", stat.Size(), info.Length)
 	}
-	if files, err := os.ReadDir(path.Join(workDir, torrent.WorkDir())); err == nil || len(files) > 0 {
+	if files, err := os.ReadDir(filepath.Join(workDir, torrent.WorkDir())); err == nil || len(files) > 0 {
 		t.Error("want: cleaned up pieces on disk")
 	}
 	checkBlock := func(index, begin, length int) {
@@ -198,12 +198,12 @@ func TestMultiFileIntegration(t *testing.T) {
 	if !torrent.coalesced {
 		t.Fatal("want: coalesced torrent")
 	}
-	if _, err = os.Stat(path.Join(targetDir, torrent.FileName())); err != nil {
+	if _, err = os.Stat(filepath.Join(targetDir, torrent.FileName())); err != nil {
 		t.Fatal("want: coalesced torrent on disk")
 	}
 	for _, file := range info.Files {
-		filepath := append([]string{targetDir, torrent.FileName()}, file.Path...)
-		stat, err := os.Stat(path.Join(filepath...))
+		fp := append([]string{targetDir, torrent.FileName()}, file.Path...)
+		stat, err := os.Stat(filepath.Join(fp...))
 		if err != nil {
 			t.Fatalf("want: coalesced torrent file on disk: %v", file.Path)
 		}
@@ -211,7 +211,7 @@ func TestMultiFileIntegration(t *testing.T) {
 			t.Fatalf("want: coalesced torrent file size on disk: %d != %d", stat.Size(), file.Length)
 		}
 	}
-	if files, err := os.ReadDir(path.Join(workDir, torrent.WorkDir())); err == nil || len(files) > 0 {
+	if files, err := os.ReadDir(filepath.Join(workDir, torrent.WorkDir())); err == nil || len(files) > 0 {
 		t.Error("want: cleaned up pieces on disk")
 	}
 	checkBlock := func(index, begin, length int) {

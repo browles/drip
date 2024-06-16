@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
+	"path/filepath"
 	"sync"
 
 	"github.com/browles/drip/api/metainfo"
@@ -40,7 +40,7 @@ func (s *Storage) AddTorrent(info *metainfo.Info) error {
 		return nil
 	}
 	torrent := newTorrent(info)
-	_, err := os.Stat(path.Join(s.TargetDir, torrent.FileName()))
+	_, err := os.Stat(filepath.Join(s.TargetDir, torrent.FileName()))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -51,7 +51,7 @@ func (s *Storage) AddTorrent(info *metainfo.Info) error {
 		torrent.complete()
 		return nil
 	}
-	direntries, err := os.ReadDir(path.Join(s.WorkDir, torrent.WorkDir()))
+	direntries, err := os.ReadDir(filepath.Join(s.WorkDir, torrent.WorkDir()))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -154,7 +154,7 @@ func (s *Storage) getBlockFromTorrent(torrent *Torrent, index, begin, length int
 }
 
 func (s *Storage) getBlockFromSingleFile(torrent *Torrent, index, begin, length int) ([]byte, error) {
-	filename := path.Join(s.TargetDir, torrent.FileName())
+	filename := filepath.Join(s.TargetDir, torrent.FileName())
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -187,8 +187,8 @@ func (s *Storage) getBlockFromMultiFile(torrent *Torrent, index, begin, length i
 			if total < start {
 				offset = start - total
 			}
-			filepath := append([]string{s.TargetDir, torrent.FileName()}, file.Path...)
-			f, err := os.Open(path.Join(filepath...))
+			fp := append([]string{s.TargetDir, torrent.FileName()}, file.Path...)
+			f, err := os.Open(filepath.Join(fp...))
 			if err != nil {
 				return nil, err
 			}
@@ -208,7 +208,7 @@ func (s *Storage) getBlockFromMultiFile(torrent *Torrent, index, begin, length i
 }
 
 func (s *Storage) getBlockFromPiece(torrent *Torrent, piece *Piece, begin, length int) ([]byte, error) {
-	f, err := os.Open(path.Join(s.WorkDir, torrent.WorkDir(), piece.FileName()))
+	f, err := os.Open(filepath.Join(s.WorkDir, torrent.WorkDir(), piece.FileName()))
 	if err != nil {
 		return nil, err
 	}
@@ -274,10 +274,10 @@ func (s *Storage) coalesceBlocks(torrent *Torrent, piece *Piece) error {
 	if hash != piece.SHA1 {
 		return &ChecksumError{hash, piece.SHA1}
 	}
-	if err = os.MkdirAll(path.Join(s.WorkDir, torrent.WorkDir()), 0o0700); err != nil {
+	if err = os.MkdirAll(filepath.Join(s.WorkDir, torrent.WorkDir()), 0o0700); err != nil {
 		return err
 	}
-	if err = os.Rename(temp.Name(), path.Join(s.WorkDir, torrent.WorkDir(), piece.FileName())); err != nil {
+	if err = os.Rename(temp.Name(), filepath.Join(s.WorkDir, torrent.WorkDir(), piece.FileName())); err != nil {
 		return err
 	}
 	torrent.completePiece(piece)
@@ -303,17 +303,17 @@ func (s *Storage) coalescePiecesForSingleFile(torrent *Torrent) error {
 	defer temp.Close()
 	var pieceReaders []io.Reader
 	for _, piece := range torrent.pieces {
-		path := path.Join(s.WorkDir, torrent.WorkDir(), piece.FileName())
+		path := filepath.Join(s.WorkDir, torrent.WorkDir(), piece.FileName())
 		pieceReaders = append(pieceReaders, &lazyFileReader{path: path})
 	}
 	r := io.MultiReader(pieceReaders...)
 	if _, err := io.Copy(temp, r); err != nil {
 		return err
 	}
-	if err = os.Rename(temp.Name(), path.Join(s.TargetDir, torrent.FileName())); err != nil {
+	if err = os.Rename(temp.Name(), filepath.Join(s.TargetDir, torrent.FileName())); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(path.Join(s.WorkDir, torrent.WorkDir())); err != nil {
+	if err := os.RemoveAll(filepath.Join(s.WorkDir, torrent.WorkDir())); err != nil {
 		return err
 	}
 	torrent.complete()
@@ -328,16 +328,16 @@ func (s *Storage) coalescePiecesForMultiFile(torrent *Torrent) error {
 	defer os.RemoveAll(temp)
 	var pieceReaders []io.Reader
 	for _, piece := range torrent.pieces {
-		path := path.Join(s.WorkDir, torrent.WorkDir(), piece.FileName())
+		path := filepath.Join(s.WorkDir, torrent.WorkDir(), piece.FileName())
 		pieceReaders = append(pieceReaders, &lazyFileReader{path: path})
 	}
 	r := io.MultiReader(pieceReaders...)
 	for _, file := range torrent.Info.Files {
-		filepath := append([]string{temp}, file.Path...)
-		if err := os.MkdirAll(path.Join(filepath[:len(filepath)-1]...), 0o0700); err != nil {
+		fp := append([]string{temp}, file.Path...)
+		if err := os.MkdirAll(filepath.Join(fp[:len(fp)-1]...), 0o0700); err != nil {
 			return err
 		}
-		f, err := os.Create(path.Join(filepath...))
+		f, err := os.Create(filepath.Join(fp...))
 		if err != nil {
 			return err
 		}
@@ -346,10 +346,10 @@ func (s *Storage) coalescePiecesForMultiFile(torrent *Torrent) error {
 		}
 		f.Close()
 	}
-	if err = os.Rename(temp, path.Join(s.TargetDir, torrent.FileName())); err != nil {
+	if err = os.Rename(temp, filepath.Join(s.TargetDir, torrent.FileName())); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(path.Join(s.WorkDir, torrent.WorkDir())); err != nil {
+	if err := os.RemoveAll(filepath.Join(s.WorkDir, torrent.WorkDir())); err != nil {
 		return err
 	}
 	torrent.complete()
