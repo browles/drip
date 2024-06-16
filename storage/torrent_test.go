@@ -7,40 +7,32 @@ import (
 	"github.com/browles/drip/api/metainfo"
 )
 
-func TestTorrent_createPiece(t *testing.T) {
-	blockAligned := &Torrent{
-		Info: &metainfo.Info{
-			Length:      4 * 8 * BLOCK_LENGTH,
-			PieceLength: 8 * BLOCK_LENGTH,
-			Pieces:      [][20]byte{{1: 1}, {2: 2}, {3: 3}, {4: 4}},
-		},
+func Test_newPiece(t *testing.T) {
+	blockAligned := &metainfo.Info{
+		Length:      4 * 8 * BLOCK_LENGTH,
+		PieceLength: 8 * BLOCK_LENGTH,
+		Pieces:      [][20]byte{{1: 1}, {2: 2}, {3: 3}, {4: 4}},
 	}
-	blockMisaligned := &Torrent{
-		Info: &metainfo.Info{
-			Length:      4*8*BLOCK_LENGTH - 1000,
-			PieceLength: 8 * BLOCK_LENGTH,
-			Pieces:      [][20]byte{{1: 1}, {2: 2}, {3: 3}, {4: 4}},
-		},
+	blockMisaligned := &metainfo.Info{
+		Length:      4*8*BLOCK_LENGTH - 1000,
+		PieceLength: 8 * BLOCK_LENGTH,
+		Pieces:      [][20]byte{{1: 1}, {2: 2}, {3: 3}, {4: 4}},
 	}
-	blockAlignedShort := &Torrent{
-		Info: &metainfo.Info{
-			Length:      4*8*BLOCK_LENGTH - BLOCK_LENGTH,
-			PieceLength: 8 * BLOCK_LENGTH,
-			Pieces:      [][20]byte{{1: 1}, {2: 2}, {3: 3}, {4: 4}},
-		},
+	blockAlignedShort := &metainfo.Info{
+		Length:      4*8*BLOCK_LENGTH - BLOCK_LENGTH,
+		PieceLength: 8 * BLOCK_LENGTH,
+		Pieces:      [][20]byte{{1: 1}, {2: 2}, {3: 3}, {4: 4}},
 	}
-	pieceBlockMisaligned := &Torrent{
-		Info: &metainfo.Info{
-			Length:      4 * 3 * BLOCK_LENGTH / 2,
-			PieceLength: 3 * BLOCK_LENGTH / 2,
-			Pieces:      [][20]byte{{1: 1}, {2: 2}, {3: 3}, {4: 4}},
-		},
+	pieceBlockMisaligned := &metainfo.Info{
+		Length:      4 * 3 * BLOCK_LENGTH / 2,
+		PieceLength: 3 * BLOCK_LENGTH / 2,
+		Pieces:      [][20]byte{{1: 1}, {2: 2}, {3: 3}, {4: 4}},
 	}
 	tests := []struct {
-		name    string
-		torrent *Torrent
-		index   int
-		want    *Piece
+		name  string
+		info  *metainfo.Info
+		index int
+		want  *Piece
 	}{
 		{
 			"block aligned", blockAligned, 0,
@@ -101,7 +93,7 @@ func TestTorrent_createPiece(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.torrent.createPiece(tt.index)
+			got := newPiece(tt.info, tt.index)
 			got.Done = nil // cannot compare channels
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Torrent.createPiece() = %+v, want %+v", got, tt.want)

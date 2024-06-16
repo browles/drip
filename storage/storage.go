@@ -3,11 +3,9 @@ package storage
 import (
 	"bytes"
 	"crypto/sha1"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"sync"
@@ -41,14 +39,7 @@ func (s *Storage) AddTorrent(info *metainfo.Info) error {
 	if _, ok := s.torrents[info.SHA1]; ok {
 		return nil
 	}
-	torrent := &Torrent{
-		Info:   info,
-		Done:   make(chan struct{}),
-		pieces: make([]*Piece, len(info.Pieces)),
-	}
-	for i := range len(info.Pieces) {
-		torrent.pieces[i] = torrent.createPiece(i)
-	}
+	torrent := newTorrent(info)
 	_, err := os.Stat(path.Join(s.TargetDir, torrent.FileName()))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -61,19 +52,21 @@ func (s *Storage) AddTorrent(info *metainfo.Info) error {
 		return nil
 	}
 	direntries, err := os.ReadDir(path.Join(s.WorkDir, torrent.WorkDir()))
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err == nil {
+		for _, dr := range direntries {
+			var i int
+			_, err := fmt.Sscanf(dr.Name(), "%d.piece", &i)
+			if err != nil {
+				continue
+			}
+			torrent.completePiece(torrent.pieces[i])
+		}
+		if err = s.coalescePieces(torrent); err != nil {
 			return err
 		}
-		return nil
-	}
-	for _, dr := range direntries {
-		var i int
-		_, err := fmt.Sscanf(dr.Name(), "%d.piece", &i)
-		if err != nil {
-			continue
-		}
-		torrent.completePiece(torrent.pieces[i])
 	}
 	s.torrents[info.SHA1] = torrent
 	return nil
@@ -95,6 +88,9 @@ func (s *Storage) GetPiece(infoHash [20]byte, index int) *Piece {
 
 func (s *Storage) GetBlock(infoHash [20]byte, index, begin, length int) ([]byte, error) {
 	torrent := s.GetTorrent(infoHash)
+	if err := checkBlockSize(torrent.Info, index, begin, length); err != nil {
+		return nil, err
+	}
 	torrent.mu.RLock()
 	defer torrent.mu.RUnlock()
 	if torrent.coalesced {
@@ -110,10 +106,10 @@ func (s *Storage) GetBlock(infoHash [20]byte, index, begin, length int) ([]byte,
 }
 
 func (s *Storage) PutBlock(infoHash [20]byte, index, begin int, data []byte) error {
-	if begin%BLOCK_LENGTH != 0 {
-		return fmt.Errorf("storage: misaligned block: %d %% %d != 0", begin, BLOCK_LENGTH)
-	}
 	torrent := s.GetTorrent(infoHash)
+	if err := checkBlockSize(torrent.Info, index, begin, len(data)); err != nil {
+		return err
+	}
 	torrent.mu.RLock()
 	if torrent.coalesced {
 		torrent.mu.RUnlock()
@@ -225,16 +221,32 @@ func (s *Storage) getBlockFromPiece(torrent *Torrent, piece *Piece, begin, lengt
 	return data[:n], nil
 }
 
+func checkBlockSize(info *metainfo.Info, index, begin, length int) error {
+	if begin%BLOCK_LENGTH != 0 {
+		return fmt.Errorf("storage: misaligned block: %d %% %d != 0", begin, BLOCK_LENGTH)
+	}
+	pieceLength := info.PieceLength
+	if index == len(info.Pieces)-1 {
+		pieceLength = info.Length - index*info.PieceLength
+	}
+	expectedBlockLength := BLOCK_LENGTH
+	lastBlock := BLOCK_LENGTH * (pieceLength / BLOCK_LENGTH)
+	if begin == lastBlock {
+		expectedBlockLength = pieceLength - begin
+	}
+	if expectedBlockLength != length {
+		return fmt.Errorf("storage: unexpected block length: %d != %d", length, expectedBlockLength)
+	}
+	return nil
+}
+
 type ChecksumError struct {
 	Got  [20]byte
 	Want [20]byte
 }
 
 func (cse *ChecksumError) Error() string {
-	return fmt.Sprintf("storage: SHA1 does not match target: got %s != want %s",
-		hex.EncodeToString(cse.Got[:]),
-		hex.EncodeToString(cse.Want[:]),
-	)
+	return fmt.Sprintf("storage: SHA1 does not match target: got %x != want %x", cse.Got, cse.Want)
 }
 
 func (s *Storage) coalesceBlocks(torrent *Torrent, piece *Piece) error {
@@ -247,20 +259,23 @@ func (s *Storage) coalesceBlocks(torrent *Torrent, piece *Piece) error {
 	}
 	defer os.Remove(temp.Name())
 	defer temp.Close()
-	sha1Digest := sha1.New()
 	var blockReaders []io.Reader
 	for _, b := range piece.blocks {
 		blockReaders = append(blockReaders, bytes.NewReader(b.data))
 	}
 	mr := io.MultiReader(blockReaders...)
+	sha1Digest := sha1.New()
 	r := io.TeeReader(mr, sha1Digest)
 	if _, err := io.Copy(temp, r); err != nil {
 		return err
 	}
 	var hash [20]byte
-	sha1Digest.Sum(hash[:])
+	sha1Digest.Sum(hash[:0])
 	if hash != piece.SHA1 {
 		return &ChecksumError{hash, piece.SHA1}
+	}
+	if err = os.MkdirAll(path.Join(s.WorkDir, torrent.WorkDir()), 0o0700); err != nil {
+		return err
 	}
 	if err = os.Rename(temp.Name(), path.Join(s.WorkDir, torrent.WorkDir(), piece.FileName())); err != nil {
 		return err
@@ -319,7 +334,7 @@ func (s *Storage) coalescePiecesForMultiFiles(torrent *Torrent) error {
 	r := io.MultiReader(pieceReaders...)
 	for _, file := range torrent.Info.Files {
 		filepath := append([]string{temp}, file.Path...)
-		if err := os.MkdirAll(path.Join(filepath[:len(filepath)-1]...), fs.FileMode(os.O_RDWR)); err != nil {
+		if err := os.MkdirAll(path.Join(filepath[:len(filepath)-1]...), 0o0700); err != nil {
 			return err
 		}
 		f, err := os.Create(path.Join(filepath...))

@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"encoding/hex"
 	"fmt"
 	"slices"
 	"sync"
@@ -13,6 +12,7 @@ import (
 type Torrent struct {
 	Info *metainfo.Info
 	Done chan struct{}
+	err  error
 
 	mu             sync.RWMutex
 	bitfield       bitfield.Bitfield
@@ -22,7 +22,7 @@ type Torrent struct {
 }
 
 func (t *Torrent) WorkDir() string {
-	return hex.EncodeToString(t.Info.SHA1[:])
+	return fmt.Sprintf("%x", t.Info.SHA1)
 }
 
 func (t *Torrent) FileName() string {
@@ -39,6 +39,12 @@ func (t *Torrent) GetPiece(index int) *Piece {
 	return t.pieces[index]
 }
 
+func (t *Torrent) Err() error {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.err
+}
+
 type Piece struct {
 	SHA1      [20]byte
 	Done      chan struct{}
@@ -49,10 +55,25 @@ type Piece struct {
 	coalesced      bool
 	completeBlocks int
 	blocks         []*block
+	err            error
 }
 
 func (p *Piece) FileName() string {
 	return fmt.Sprintf("%d.piece", p.Index)
+}
+
+func (p *Piece) Err() error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.err
+}
+
+func (p *Piece) Reset() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.completeBlocks = 0
+	p.blocks = nil
+	p.err = nil
 }
 
 type block struct {
@@ -61,17 +82,29 @@ type block struct {
 	data  []byte
 }
 
-func (t *Torrent) createPiece(index int) *Piece {
-	pieceLength := t.Info.PieceLength
-	if index == len(t.Info.Pieces)-1 {
-		pieceLength = t.Info.Length - index*t.Info.PieceLength
+func newTorrent(info *metainfo.Info) *Torrent {
+	torrent := &Torrent{
+		Info:   info,
+		Done:   make(chan struct{}),
+		pieces: make([]*Piece, len(info.Pieces)),
+	}
+	for i := range len(info.Pieces) {
+		torrent.pieces[i] = newPiece(info, i)
+	}
+	return torrent
+}
+
+func newPiece(info *metainfo.Info, index int) *Piece {
+	pieceLength := info.PieceLength
+	if index == len(info.Pieces)-1 {
+		pieceLength = info.Length - index*info.PieceLength
 	}
 	numBlocks := pieceLength / BLOCK_LENGTH
 	if pieceLength%BLOCK_LENGTH != 0 {
 		numBlocks++
 	}
 	return &Piece{
-		SHA1:      t.Info.Pieces[index],
+		SHA1:      info.Pieces[index],
 		Index:     index,
 		Done:      make(chan struct{}),
 		numBlocks: numBlocks,
