@@ -49,7 +49,7 @@ func randomBytes(t *testing.T, n int) []byte {
 	return data
 }
 
-func TestIntegration(t *testing.T) {
+func TestSingleFileIntegration(t *testing.T) {
 	targetDir := t.TempDir()
 	workDir := t.TempDir()
 	tempDir := t.TempDir()
@@ -64,7 +64,7 @@ func TestIntegration(t *testing.T) {
 	total := 0
 	for i := range pieces {
 		sha1s[i] = sha1.Sum(pieces[i])
-		total = len(pieces[i])
+		total += len(pieces[i])
 	}
 	info := &metainfo.Info{
 		SHA1:        [20]byte{1: 1, 2: 2, 3: 3, 4: 4, 5: 5},
@@ -78,44 +78,35 @@ func TestIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	torrent := storage.GetTorrent(info.SHA1)
-	_, err = storage.GetBlock(info.SHA1, 0, 1024, BLOCK_LENGTH)
-	if err == nil {
+	piece := storage.GetPiece(info.SHA1, 0)
+	if _, err = storage.GetBlock(info.SHA1, 0, 1024, BLOCK_LENGTH); err == nil {
 		t.Fatal("want: block alignment error")
 	}
-	_, err = storage.GetBlock(info.SHA1, 0, 0, 1024)
-	if err == nil {
+	if _, err = storage.GetBlock(info.SHA1, 0, 0, 1024); err == nil {
 		t.Fatal("want: block length error")
 	}
-	_, err = storage.GetBlock(info.SHA1, 0, 0, BLOCK_LENGTH)
-	if err == nil {
+	if _, err = storage.GetBlock(info.SHA1, 0, 0, BLOCK_LENGTH); err == nil {
 		t.Fatal("want: piece not coalesced error")
 	}
-	err = storage.PutBlock(info.SHA1, 0, 1024, pieces[0][:BLOCK_LENGTH/2])
-	if err == nil {
+	if err = storage.PutBlock(info.SHA1, 0, 1024, pieces[0][:BLOCK_LENGTH/2]); err == nil {
 		t.Fatal("want: block alignment error")
 	}
-	err = storage.PutBlock(info.SHA1, 0, 0, pieces[0][:BLOCK_LENGTH/2])
-	if err == nil {
+	if err = storage.PutBlock(info.SHA1, 0, 0, pieces[0][:BLOCK_LENGTH/2]); err == nil {
 		t.Fatal("want: block length error")
 	}
-	err = storage.PutBlock(info.SHA1, 0, 0, pieces[0][:BLOCK_LENGTH])
-	if err != nil {
+	if err = storage.PutBlock(info.SHA1, 0, 0, pieces[0][:BLOCK_LENGTH]); err != nil {
 		t.Fatal(err)
 	}
-	_, err = storage.GetBlock(info.SHA1, 0, 0, BLOCK_LENGTH)
-	if err == nil {
+	if _, err = storage.GetBlock(info.SHA1, 0, 0, BLOCK_LENGTH); err == nil {
 		t.Fatal("want: piece not coalesced error")
 	}
-	err = storage.PutBlock(info.SHA1, 0, BLOCK_LENGTH, pieces[0][BLOCK_LENGTH:])
-	if err != nil {
+	if err = storage.PutBlock(info.SHA1, 0, BLOCK_LENGTH, pieces[0][BLOCK_LENGTH:]); err != nil {
 		t.Fatal(err)
 	}
-	p := storage.GetPiece(info.SHA1, 0)
-	if !p.coalesced {
+	if !piece.coalesced {
 		t.Fatal("want: coalesced piece")
 	}
-	_, err = os.Stat(path.Join(workDir, torrent.WorkDir(), "0.piece"))
-	if err != nil {
+	if _, err = os.Stat(path.Join(workDir, torrent.WorkDir(), "0.piece")); err != nil {
 		t.Fatal("want: coalesced piece on disk")
 	}
 	data, err := storage.GetBlock(info.SHA1, 0, 0, BLOCK_LENGTH)
@@ -123,6 +114,30 @@ func TestIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(data, pieces[0][:BLOCK_LENGTH]) {
-		t.Fatal("want: correct block data")
+		t.Fatal("want: correct block data from piece")
+	}
+	for i := 1; i < len(pieces); i++ {
+		if err = storage.PutBlock(info.SHA1, i, 0, pieces[i][:BLOCK_LENGTH]); err != nil {
+			t.Fatal(err)
+		}
+		if err = storage.PutBlock(info.SHA1, i, BLOCK_LENGTH, pieces[i][BLOCK_LENGTH:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !torrent.coalesced {
+		t.Fatal("want: coalesced torrent")
+	}
+	if _, err = os.Stat(path.Join(targetDir, torrent.FileName())); err != nil {
+		t.Fatal("want: coalesced torrent on disk")
+	}
+	if files, err := os.ReadDir(path.Join(workDir, torrent.WorkDir())); err == nil || len(files) > 0 {
+		t.Fatal("want: cleaned up pieces on disk")
+	}
+	data, err = storage.GetBlock(info.SHA1, 3, BLOCK_LENGTH, BLOCK_LENGTH-1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(data, pieces[3][BLOCK_LENGTH:]) {
+		t.Fatal("want: correct block data from torrent")
 	}
 }
