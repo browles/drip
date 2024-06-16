@@ -146,6 +146,15 @@ func (s *Storage) PutBlock(infoHash [20]byte, index, begin int, data []byte) err
 	return nil
 }
 
+type ChecksumError struct {
+	Got  [20]byte
+	Want [20]byte
+}
+
+func (cse *ChecksumError) Error() string {
+	return fmt.Sprintf("storage: SHA1 does not match target: got %x != want %x", cse.Got, cse.Want)
+}
+
 func (s *Storage) getBlockFromTorrent(torrent *Torrent, index, begin, length int) ([]byte, error) {
 	if len(torrent.Info.Files) > 0 {
 		return s.getBlockFromMultiFile(torrent, index, begin, length)
@@ -238,15 +247,6 @@ func checkBlockSize(info *metainfo.Info, index, begin, length int) error {
 		return fmt.Errorf("storage: unexpected block length: %d != %d", length, expectedBlockLength)
 	}
 	return nil
-}
-
-type ChecksumError struct {
-	Got  [20]byte
-	Want [20]byte
-}
-
-func (cse *ChecksumError) Error() string {
-	return fmt.Sprintf("storage: SHA1 does not match target: got %x != want %x", cse.Got, cse.Want)
 }
 
 func (s *Storage) coalesceBlocks(torrent *Torrent, piece *Piece) error {
