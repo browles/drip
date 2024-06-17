@@ -24,6 +24,12 @@ type Storage struct {
 	torrents map[[20]byte]*Torrent
 }
 
+var (
+	ErrIncompletePiece = errors.New("storage: incomplete piece")
+	ErrBlockExists     = errors.New("storage: block exists")
+	ErrUnknownInfo     = errors.New("storage: unknown info hash")
+)
+
 func New(targetDir, workDir, tempDir string) *Storage {
 	return &Storage{
 		TargetDir: targetDir,
@@ -79,7 +85,7 @@ func (s *Storage) GetTorrent(infohash [20]byte) *Torrent {
 	defer s.mu.RUnlock()
 	torrent, ok := s.torrents[infohash]
 	if !ok {
-		panic(errors.New("storage: GetTorrent: unknown info hash"))
+		panic(ErrUnknownInfo)
 	}
 	return torrent
 }
@@ -99,7 +105,7 @@ func (s *Storage) GetBlock(infoHash [20]byte, index, begin, length int) ([]byte,
 	piece.mu.RLock()
 	defer piece.mu.RUnlock()
 	if !piece.coalesced {
-		return nil, errors.New("storage: GetBlock: incomplete piece")
+		return nil, ErrIncompletePiece
 	}
 	return s.getBlockFromPiece(torrent, piece, begin, length)
 }
@@ -112,13 +118,15 @@ func (s *Storage) PutBlock(infoHash [20]byte, index, begin int, data []byte) err
 	torrent.mu.RLock()
 	if torrent.coalesced {
 		torrent.mu.RUnlock()
-		return nil
+		return ErrBlockExists
 	}
 	torrent.mu.RUnlock()
 	piece := torrent.pieces[index]
 	piece.mu.Lock()
 	defer piece.mu.Unlock()
-	piece.putBlock(begin, data)
+	if err := piece.putBlock(begin, data); err != nil {
+		return err
+	}
 	torrent.mu.Lock()
 	defer torrent.mu.Unlock()
 	if err := s.coalesceBlocks(torrent, piece); err != nil {
@@ -131,12 +139,13 @@ func (s *Storage) PutBlock(infoHash [20]byte, index, begin int, data []byte) err
 }
 
 type ChecksumError struct {
-	Got  [20]byte
-	Want [20]byte
+	Index int
+	Got   [20]byte
+	Want  [20]byte
 }
 
 func (cse *ChecksumError) Error() string {
-	return fmt.Sprintf("storage: SHA1 does not match target: got %x != want %x", cse.Got, cse.Want)
+	return fmt.Sprintf("storage: SHA1 does not match target, piece=%d: got %x != want %x", cse.Index, cse.Got, cse.Want)
 }
 
 func (s *Storage) getBlockFromTorrent(torrent *Torrent, index, begin, length int) ([]byte, error) {
@@ -256,7 +265,7 @@ func (s *Storage) coalesceBlocks(torrent *Torrent, piece *Piece) error {
 	var hash [20]byte
 	sha1Digest.Sum(hash[:0])
 	if hash != piece.SHA1 {
-		return &ChecksumError{hash, piece.SHA1}
+		return &ChecksumError{piece.Index, hash, piece.SHA1}
 	}
 	if err = os.MkdirAll(filepath.Join(s.WorkDir, torrent.WorkDir()), 0o0700); err != nil {
 		return err

@@ -12,13 +12,13 @@ import (
 type Torrent struct {
 	Info *metainfo.Info
 	Done chan struct{}
-	err  error
 
 	mu             sync.RWMutex
 	bitfield       bitfield.Bitfield
 	coalesced      bool
 	completePieces int
 	pieces         []*Piece
+	err            error
 }
 
 func (t *Torrent) WorkDir() string {
@@ -122,15 +122,15 @@ func (t *Torrent) complete() {
 	close(t.Done)
 }
 
-func (p *Piece) putBlock(begin int, data []byte) {
+func (p *Piece) putBlock(begin int, data []byte) error {
 	if p.coalesced {
-		return
+		return ErrBlockExists
 	}
 	if p.blocks == nil {
 		p.blocks = make([]*block, p.numBlocks)
 	}
 	if p.blocks[begin/BLOCK_LENGTH] != nil {
-		return
+		return ErrBlockExists
 	}
 	block := &block{
 		index: p.Index,
@@ -139,6 +139,7 @@ func (p *Piece) putBlock(begin int, data []byte) {
 	}
 	p.blocks[block.begin/BLOCK_LENGTH] = block
 	p.completeBlocks++
+	return nil
 }
 
 func (p *Piece) reset() {
