@@ -17,9 +17,9 @@ type Request struct {
 	PeerID     string
 	IP         string
 	Port       int
-	Uploaded   int
-	Downloaded int
-	Left       int
+	Uploaded   int64
+	Downloaded int64
+	Left       int64
 	Event      string
 	Compact    bool
 	// more?
@@ -40,9 +40,9 @@ func (r *Request) URL() *url.URL {
 		"peer_id":    r.PeerID,
 		"ip":         r.IP,
 		"port":       strconv.Itoa(r.Port),
-		"uploaded":   strconv.Itoa(r.Uploaded),
-		"downloaded": strconv.Itoa(r.Downloaded),
-		"left":       strconv.Itoa(r.Left),
+		"uploaded":   strconv.FormatInt(r.Uploaded, 10),
+		"downloaded": strconv.FormatInt(r.Downloaded, 10),
+		"left":       strconv.FormatInt(r.Left, 10),
 		"event":      r.Event,
 		// http://bittorrent.org/beps/bep_0023.html
 		"compact": ifelse(r.Compact, "1", "0"),

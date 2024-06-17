@@ -77,7 +77,7 @@ func TestIntegrationReloadingPartialTorrents(t *testing.T) {
 		PieceLength: 2 * BLOCK_LENGTH,
 		Pieces:      sha1s,
 		Name:        "output_file.txt",
-		Length:      total,
+		Length:      int64(total),
 	}
 	err := storage.AddTorrent(info)
 	if err != nil {
@@ -211,7 +211,7 @@ func TestIntegrationSingleFileTorrent(t *testing.T) {
 		PieceLength: 2 * BLOCK_LENGTH,
 		Pieces:      sha1s,
 		Name:        "output_file.txt",
-		Length:      total,
+		Length:      int64(total),
 	}
 	err := storage.AddTorrent(info)
 	if err != nil {
@@ -283,11 +283,10 @@ func TestIntegrationMultiFileTorrent(t *testing.T) {
 		PieceLength: 2 * BLOCK_LENGTH,
 		Pieces:      sha1s,
 		Name:        "output_dir",
-		Length:      total,
 		Files: []*metainfo.File{
 			{Length: (3 * BLOCK_LENGTH) / 2, Path: []string{"a.txt"}},
 			{Length: 2 * BLOCK_LENGTH, Path: []string{"b", "b.txt"}},
-			{Length: total - 2*BLOCK_LENGTH - (3*BLOCK_LENGTH)/2, Path: []string{"b", "c", "c.txt"}},
+			{Length: int64(total) - 2*BLOCK_LENGTH - (3*BLOCK_LENGTH)/2, Path: []string{"b", "c", "c.txt"}},
 		},
 	}
 	err := storage.AddTorrent(info)
@@ -368,7 +367,7 @@ func TestIntegrationConcurrentAccess(t *testing.T) {
 		PieceLength: 4 * BLOCK_LENGTH,
 		Pieces:      sha1s,
 		Name:        "output_file.txt",
-		Length:      total,
+		Length:      int64(total),
 	}
 	err := storage.AddTorrent(info)
 	if err != nil {

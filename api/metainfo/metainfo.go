@@ -46,10 +46,28 @@ type Info struct {
 	// Advisory filename or directory, depending on the mode
 	Name string `bencode:"name"`
 	// Single file mode
-	Length int    `bencode:"length,omitempty"`
+	Length int64  `bencode:"length,omitempty"`
 	MD5Sum string `bencode:"md5sum,omitempty"`
 	// Multi file mode
 	Files []*File `bencode:"files,omitempty"`
+}
+
+func (i *Info) GetLength() int64 {
+	if len(i.Files) > 0 {
+		var sum int64
+		for _, f := range i.Files {
+			sum += f.Length
+		}
+		return sum
+	}
+	return i.Length
+}
+
+func (i *Info) GetPieceLength(index int) int {
+	if index == len(i.Pieces)-1 {
+		return int(i.GetLength() - int64(index)*int64(i.PieceLength))
+	}
+	return i.PieceLength
 }
 
 type info Info
@@ -93,7 +111,7 @@ func (p *Pieces) UnmarshalBencoding(data []byte) error {
 }
 
 type File struct {
-	Length int      `bencode:"length"`
+	Length int64    `bencode:"length"`
 	MD5Sum string   `bencode:"md5sum,omitempty"`
 	Path   []string `bencode:"path"`
 }

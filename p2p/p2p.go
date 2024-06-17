@@ -298,10 +298,7 @@ func (p2p *Peer2Peer) requestPiece(ctx context.Context, peer *Peer, index int) e
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, 16) // todo: adaptive queue
 	errs := make(chan error)
-	pieceLength := p2p.Info.PieceLength
-	if index == len(p2p.Info.Pieces)-1 {
-		pieceLength = p2p.Info.Length - index*p2p.Info.PieceLength
-	}
+	pieceLength := p2p.Info.GetPieceLength(index)
 	for begin := 0; begin < pieceLength; begin += storage.BLOCK_LENGTH {
 		blockLength := min(storage.BLOCK_LENGTH, pieceLength-begin)
 		wg.Add(1)
@@ -328,6 +325,9 @@ func (p2p *Peer2Peer) requestPiece(ctx context.Context, peer *Peer, index int) e
 		}
 		return err
 	case <-piece.Done:
+		if err := piece.Err(); err != nil {
+			return err
+		}
 	}
 	p2p.mu.Lock()
 	defer p2p.mu.Unlock()

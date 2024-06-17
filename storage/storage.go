@@ -177,17 +177,17 @@ func (s *Storage) getBlockFromSingleFile(torrent *Torrent, index, begin, length 
 func (s *Storage) getBlockFromMultiFile(torrent *Torrent, index, begin, length int) ([]byte, error) {
 	curr := 0
 	data := make([]byte, length)
-	total := 0
+	var total int64
 	start := index*torrent.Info.PieceLength + begin
 	end := start + length
 	for _, file := range torrent.Info.Files {
-		if total >= end {
+		if total >= int64(end) {
 			break
 		}
-		if total+file.Length >= start {
+		if total+file.Length >= int64(start) {
 			offset := 0
-			if total < start {
-				offset = start - total
+			if total < int64(start) {
+				offset = start - int(total)
 			}
 			fp := append([]string{s.TargetDir, torrent.FileName()}, file.Path...)
 			f, err := os.Open(filepath.Join(fp...))
@@ -227,10 +227,7 @@ func checkBlockSize(info *metainfo.Info, index, begin, length int) error {
 	if begin%BLOCK_LENGTH != 0 {
 		return fmt.Errorf("storage: misaligned block: %d %% %d != 0", begin, BLOCK_LENGTH)
 	}
-	pieceLength := info.PieceLength
-	if index == len(info.Pieces)-1 {
-		pieceLength = info.Length - index*info.PieceLength
-	}
+	pieceLength := info.GetPieceLength(index)
 	expectedBlockLength := BLOCK_LENGTH
 	lastBlock := BLOCK_LENGTH * (pieceLength / BLOCK_LENGTH)
 	if begin == lastBlock {

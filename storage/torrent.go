@@ -93,10 +93,7 @@ func newTorrent(info *metainfo.Info) *Torrent {
 }
 
 func newPiece(info *metainfo.Info, index int) *Piece {
-	pieceLength := info.PieceLength
-	if index == len(info.Pieces)-1 {
-		pieceLength = info.Length - index*info.PieceLength
-	}
+	pieceLength := info.GetPieceLength(index)
 	numBlocks := pieceLength / BLOCK_LENGTH
 	if pieceLength%BLOCK_LENGTH != 0 {
 		numBlocks++
