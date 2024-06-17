@@ -27,7 +27,7 @@ type Storage struct {
 var (
 	ErrIncompletePiece = errors.New("storage: incomplete piece")
 	ErrBlockExists     = errors.New("storage: block exists")
-	ErrUnknownInfo     = errors.New("storage: unknown info hash")
+	ErrUnknownTorrent  = errors.New("storage: unknown info hash")
 )
 
 func New(targetDir, workDir, tempDir string) *Storage {
@@ -85,7 +85,7 @@ func (s *Storage) GetTorrent(infohash [20]byte) *Torrent {
 	defer s.mu.RUnlock()
 	torrent, ok := s.torrents[infohash]
 	if !ok {
-		panic(ErrUnknownInfo)
+		panic(ErrUnknownTorrent)
 	}
 	return torrent
 }

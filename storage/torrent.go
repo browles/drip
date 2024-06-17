@@ -47,11 +47,11 @@ func (t *Torrent) Err() error {
 
 type Piece struct {
 	SHA1      [20]byte
-	Done      chan struct{}
 	Index     int
 	numBlocks int
 
 	mu             sync.RWMutex
+	Done           chan struct{}
 	coalesced      bool
 	completeBlocks int
 	blocks         []*block
@@ -110,9 +110,9 @@ func newPiece(info *metainfo.Info, index int) *Piece {
 }
 
 func (t *Torrent) completePiece(piece *Piece) {
-	piece.reset()
 	piece.coalesced = true
 	close(piece.Done)
+	piece.blocks = nil
 	t.bitfield.Add(piece.Index)
 	t.completePieces++
 }
@@ -142,7 +142,15 @@ func (p *Piece) putBlock(begin int, data []byte) error {
 	return nil
 }
 
+func (p *Piece) fail(err error) {
+	p.err = err
+	close(p.Done)
+}
+
 func (p *Piece) reset() {
+	if !p.coalesced {
+		p.Done = make(chan struct{})
+	}
 	p.err = nil
 	p.blocks = nil
 	p.completeBlocks = 0
