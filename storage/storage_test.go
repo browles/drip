@@ -3,6 +3,7 @@ package storage
 import (
 	"crypto/rand"
 	"crypto/sha1"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -42,11 +43,12 @@ func Test_checkBlockSize(t *testing.T) {
 	}
 }
 
-func randomBytes(t *testing.T, n int) []byte {
+func randomBytes(tb testing.TB, n int) []byte {
+	tb.Helper()
 	data := make([]byte, n)
 	_, err := rand.Read(data)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return data
 }
@@ -240,6 +242,7 @@ func TestIntegrationSingleFileTorrent(t *testing.T) {
 		t.Error("want: cleaned up pieces on disk")
 	}
 	checkBlock := func(index, begin, length int) {
+		t.Helper()
 		data, err := storage.GetBlock(info.SHA1, index, begin, length)
 		if err != nil {
 			t.Fatalf("want: block data from torrent, index=%d begin=%d length=%d: %s", index, begin, length, err)
@@ -322,6 +325,7 @@ func TestIntegrationMultiFileTorrent(t *testing.T) {
 		t.Error("want: cleaned up pieces on disk")
 	}
 	checkBlock := func(index, begin, length int) {
+		t.Helper()
 		data, err := storage.GetBlock(info.SHA1, index, begin, length)
 		if err != nil {
 			t.Fatalf("want: block data from torrent, index=%d begin=%d length=%d: %s", index, begin, length, err)
@@ -375,6 +379,7 @@ func TestIntegrationConcurrentAccess(t *testing.T) {
 	}
 	torrent := storage.GetTorrent(info.SHA1)
 	checkBlock := func(index, begin, length int) {
+		t.Helper()
 		data, err := storage.GetBlock(info.SHA1, index, begin, length)
 		if err != nil {
 			t.Errorf("want: block data from torrent, index=%d begin=%d length=%d: %s", index, begin, length, err)
@@ -427,5 +432,141 @@ func TestIntegrationConcurrentAccess(t *testing.T) {
 	}
 	if files, err := os.ReadDir(filepath.Join(workDir, torrent.WorkDir())); err == nil || len(files) > 0 {
 		t.Error("want: cleaned up pieces on disk")
+	}
+}
+
+func BenchmarkCoalesceSingleFile(b *testing.B) {
+	for range b.N {
+		b.StopTimer()
+		targetDir := b.TempDir()
+		workDir := b.TempDir()
+		tempDir := b.TempDir()
+		storage := New(targetDir, workDir, tempDir)
+		var pieces [][]byte
+		for range 128 {
+			pieces = append(pieces, randomBytes(b, 16*BLOCK_LENGTH))
+		}
+		sha1s := make([][20]byte, len(pieces))
+		total := 0
+		for i := range pieces {
+			sha1s[i] = sha1.Sum(pieces[i])
+			total += len(pieces[i])
+		}
+		info := &metainfo.Info{
+			SHA1:        [20]byte{1: 1, 2: 2, 3: 3, 4: 4, 5: 5},
+			PieceLength: 16 * BLOCK_LENGTH,
+			Pieces:      sha1s,
+			Name:        "output_file.txt",
+			Length:      int64(total),
+		}
+		err := storage.AddTorrent(info)
+		if err != nil {
+			b.Fatal(err)
+		}
+		torrent := storage.GetTorrent(info.SHA1)
+		for i := range len(pieces) - 1 {
+			for curr := 0; curr < len(pieces[i]); curr += BLOCK_LENGTH {
+				blockLength := min(BLOCK_LENGTH, len(pieces[i])-curr)
+				if err = storage.PutBlock(info.SHA1, i, curr, pieces[i][curr:curr+blockLength]); err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+		// Put the final piece without triggering coalesce
+		i := len(pieces) - 1
+		piece := torrent.pieces[i]
+		for curr := 0; curr < len(pieces[i]); curr += BLOCK_LENGTH {
+			blockLength := min(BLOCK_LENGTH, len(pieces[i])-curr)
+			if err = piece.putBlock(curr, pieces[i][curr:curr+blockLength]); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := storage.coalesceBlocks(torrent, piece); err != nil {
+			b.Fatal(err)
+		}
+		// Measure torrent coalesce
+		b.StartTimer()
+		if err := storage.coalescePieces(torrent); err != nil {
+			b.Fatal(err)
+		}
+		b.SetBytes(info.GetLength())
+		if !torrent.coalesced {
+			b.Fatal("want: coalesced torrent")
+		}
+	}
+}
+
+func BenchmarkCoalesceMultiFile(b *testing.B) {
+	for range b.N {
+		b.StopTimer()
+		targetDir := b.TempDir()
+		workDir := b.TempDir()
+		tempDir := b.TempDir()
+		storage := New(targetDir, workDir, tempDir)
+		var pieces [][]byte
+		for range 128 {
+			pieces = append(pieces, randomBytes(b, 16*BLOCK_LENGTH))
+		}
+		sha1s := make([][20]byte, len(pieces))
+		var total int64
+		for i := range pieces {
+			sha1s[i] = sha1.Sum(pieces[i])
+			total += int64(len(pieces[i]))
+		}
+		var files []*metainfo.File
+		rem := total
+		for i := range 9 {
+			length := int64(i+1) * 12 * BLOCK_LENGTH
+			rem -= length
+			files = append(files, &metainfo.File{
+				Path:   []string{fmt.Sprintf("%d.txt", i)},
+				Length: length,
+			})
+		}
+		files = append(files, &metainfo.File{
+			Path:   []string{"rest.txt"},
+			Length: rem,
+		})
+		info := &metainfo.Info{
+			SHA1:        [20]byte{1: 1, 2: 2, 3: 3, 4: 4, 5: 5},
+			PieceLength: 16 * BLOCK_LENGTH,
+			Pieces:      sha1s,
+			Name:        "output_dir",
+			Files:       files,
+		}
+		err := storage.AddTorrent(info)
+		if err != nil {
+			b.Fatal(err)
+		}
+		torrent := storage.GetTorrent(info.SHA1)
+		for i := range len(pieces) - 1 {
+			for curr := 0; curr < len(pieces[i]); curr += BLOCK_LENGTH {
+				blockLength := min(BLOCK_LENGTH, len(pieces[i])-curr)
+				if err = storage.PutBlock(info.SHA1, i, curr, pieces[i][curr:curr+blockLength]); err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+		// Put the final piece without triggering coalesce
+		i := len(pieces) - 1
+		piece := torrent.pieces[i]
+		for curr := 0; curr < len(pieces[i]); curr += BLOCK_LENGTH {
+			blockLength := min(BLOCK_LENGTH, len(pieces[i])-curr)
+			if err = piece.putBlock(curr, pieces[i][curr:curr+blockLength]); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := storage.coalesceBlocks(torrent, piece); err != nil {
+			b.Fatal(err)
+		}
+		// Measure torrent coalesce
+		b.StartTimer()
+		if err := storage.coalescePieces(torrent); err != nil {
+			b.Fatal(err)
+		}
+		b.SetBytes(info.GetLength())
+		if !torrent.coalesced {
+			b.Fatal("want: coalesced torrent")
+		}
 	}
 }
