@@ -60,8 +60,7 @@ func TestIntegrationReloadingPartialTorrents(t *testing.T) {
 	t.Parallel()
 	targetDir := t.TempDir()
 	workDir := t.TempDir()
-	tempDir := t.TempDir()
-	storage := New(targetDir, workDir, tempDir)
+	storage := New(targetDir, workDir)
 	pieces := [][]byte{
 		randomBytes(t, 2*BLOCK_LENGTH),
 		randomBytes(t, 2*BLOCK_LENGTH),
@@ -194,8 +193,7 @@ func TestIntegrationSingleFileTorrent(t *testing.T) {
 	t.Parallel()
 	targetDir := t.TempDir()
 	workDir := t.TempDir()
-	tempDir := t.TempDir()
-	storage := New(targetDir, workDir, tempDir)
+	storage := New(targetDir, workDir)
 	pieces := [][]byte{
 		randomBytes(t, 2*BLOCK_LENGTH),
 		randomBytes(t, 2*BLOCK_LENGTH),
@@ -267,8 +265,7 @@ func TestIntegrationMultiFileTorrent(t *testing.T) {
 	}
 	targetDir := t.TempDir()
 	workDir := t.TempDir()
-	tempDir := t.TempDir()
-	storage := New(targetDir, workDir, tempDir)
+	storage := New(targetDir, workDir)
 	pieces := [][]byte{
 		randomBytes(t, 2*BLOCK_LENGTH),
 		randomBytes(t, 2*BLOCK_LENGTH),
@@ -348,8 +345,7 @@ func TestIntegrationConcurrentAccess(t *testing.T) {
 	t.Parallel()
 	targetDir := t.TempDir()
 	workDir := t.TempDir()
-	tempDir := t.TempDir()
-	storage := New(targetDir, workDir, tempDir)
+	storage := New(targetDir, workDir)
 	pieces := [][]byte{
 		randomBytes(t, 4*BLOCK_LENGTH),
 		randomBytes(t, 4*BLOCK_LENGTH),
@@ -440,8 +436,7 @@ func BenchmarkCoalesceSingleFile(b *testing.B) {
 		b.StopTimer()
 		targetDir := b.TempDir()
 		workDir := b.TempDir()
-		tempDir := b.TempDir()
-		storage := New(targetDir, workDir, tempDir)
+		storage := New(targetDir, workDir)
 		var pieces [][]byte
 		for range 128 {
 			pieces = append(pieces, randomBytes(b, 16*BLOCK_LENGTH))
@@ -501,8 +496,7 @@ func BenchmarkCoalesceMultiFile(b *testing.B) {
 		b.StopTimer()
 		targetDir := b.TempDir()
 		workDir := b.TempDir()
-		tempDir := b.TempDir()
-		storage := New(targetDir, workDir, tempDir)
+		storage := New(targetDir, workDir)
 		var pieces [][]byte
 		for range 128 {
 			pieces = append(pieces, randomBytes(b, 16*BLOCK_LENGTH))

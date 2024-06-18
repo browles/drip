@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/browles/drip/bitfield"
 )
@@ -105,6 +106,27 @@ const (
 	PIECE          MessageType = 7
 	CANCEL         MessageType = 8
 )
+
+var typeToName = map[MessageType]string{
+	-1: "KEEPALIVE",
+	0:  "CHOKE",
+	1:  "UNCHOKE",
+	2:  "INTERESTED",
+	3:  "NOT_INTERESTED",
+	4:  "HAVE",
+	5:  "BITFIELD",
+	6:  "REQUEST",
+	7:  "PIECE",
+	8:  "CANCEL",
+}
+
+func (m MessageType) String() string {
+	n, ok := typeToName[m]
+	if !ok {
+		panic("unknown message type")
+	}
+	return n
+}
 
 type Message struct {
 	Type     MessageType
@@ -206,7 +228,7 @@ func (m *Message) Index() int {
 
 func (m *Message) Begin() int {
 	switch m.Type {
-	case REQUEST, CANCEL:
+	case REQUEST, CANCEL, PIECE:
 		return m.begin
 	default:
 		panic("Begin() on invalid message type")
@@ -228,6 +250,37 @@ func (m *Message) Piece() []byte {
 		return m.piece
 	default:
 		panic("Piece() on invalid message type")
+	}
+}
+
+func (m *Message) LogValue() slog.Value {
+	switch m.Type {
+	case KEEPALIVE, CHOKE, UNCHOKE, INTERESTED, NOT_INTERESTED:
+		return slog.GroupValue(slog.String("type", m.Type.String()))
+	case HAVE:
+		return slog.GroupValue(
+			slog.String("type", m.Type.String()),
+			slog.Int("index", m.Index()))
+	case BITFIELD:
+		return slog.GroupValue(
+			slog.String("type", m.Type.String()),
+			slog.String("bitfield", "<omitted>"),
+		)
+	case REQUEST, CANCEL:
+		return slog.GroupValue(
+			slog.String("type", m.Type.String()),
+			slog.Int("index", m.Index()),
+			slog.Int("begin", m.Begin()),
+			slog.Int("length", m.Length()))
+	case PIECE:
+		return slog.GroupValue(
+			slog.String("type", m.Type.String()),
+			slog.Int("index", m.Index()),
+			slog.Int("begin", m.Begin()),
+			slog.Int("length", len(m.Piece())),
+			slog.String("piece", "<omitted>"))
+	default:
+		panic("unknown message type")
 	}
 }
 

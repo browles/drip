@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -19,7 +20,7 @@ type Peer struct {
 	RemoteChoked     bool
 	RemoteInterested bool
 	Choked           bool
-	Pieces           bitfield.Bitfield
+	Bitfield         bitfield.Bitfield
 
 	mu               sync.Mutex
 	inflightRequests map[blockRequest]chan error
@@ -28,6 +29,7 @@ type Peer struct {
 var ErrChoked = errors.New("p2p: peer connection is choked")
 
 func DialTCP(peer *tracker.Peer) (*Peer, error) {
+	slog.Debug("DialTCP", "ip", peer.IP, "port", peer.Port)
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", peer.IP, peer.Port))
 	if err != nil {
 		return nil, fmt.Errorf("DialTCP: %w", err)
@@ -59,26 +61,29 @@ func (p *Peer) Handshake(hs *peerapi.Handshake) error {
 		return err
 	}
 	if phs.InfoHash != hs.InfoHash {
-		return errors.New("Handshake: info hashes do not match")
+		return errors.New("p2p: Handshake: info hashes do not match")
 	}
 	if p.ID != "" && p.ID != string(phs.PeerID[:]) {
-		return errors.New("Handshake: peer IDs do not match")
+		return errors.New("p2p: Handshake: peer IDs do not match")
 	}
 	p.ID = string(phs.PeerID[:])
+	slog.Debug("Handshake", "id", p.ID)
 	return nil
 }
 
 func (p *Peer) Send(m *peerapi.Message) error {
+	defer slog.Debug("Send", "peer", p.ID, "message", m)
 	p.SetReadDeadline(time.Now().Add(2 * time.Minute))
 	return peerapi.Write(p.Conn, m)
 }
 
-func (p *Peer) Receive() (*peerapi.Message, error) {
+func (p *Peer) Receive() (m *peerapi.Message, err error) {
 	p.SetReadDeadline(time.Now().Add(2 * time.Minute))
-	m, err := peerapi.ReadMessage(p.Conn)
+	m, err = peerapi.ReadMessage(p.Conn)
 	if err != nil {
 		return nil, err
 	}
+	slog.Debug("Receive", "peer", p.ID, "message", m)
 	switch m.Type {
 	case peerapi.PIECE:
 		p.mu.Lock()
@@ -110,17 +115,7 @@ func (p *Peer) Unchoke() error {
 	return peerapi.Write(p.Conn, peerapi.Unchoke())
 }
 
-func (p *Peer) completeRequest(br *blockRequest, err error) {
-	if done, ok := p.inflightRequests[*br]; ok {
-		if err != nil {
-			done <- err
-		}
-		close(done)
-		delete(p.inflightRequests, *br)
-	}
-}
-
-func (p *Peer) requestBlock(ctx context.Context, br *blockRequest) error {
+func (p *Peer) RequestBlock(ctx context.Context, br *blockRequest) error {
 	if p.RemoteChoked {
 		return ErrChoked
 	}
@@ -129,6 +124,11 @@ func (p *Peer) requestBlock(ctx context.Context, br *blockRequest) error {
 		p.mu.Unlock()
 		return nil
 	}
+	start := time.Now()
+	slog.Debug("RequestBlock", "index", br.index, "begin", br.begin, "length", br.length)
+	defer func() {
+		slog.Debug("RequestBlock.time", "index", br.index, "begin", br.begin, "length", br.length, "time", time.Since(start))
+	}()
 	done := make(chan error)
 	p.inflightRequests[*br] = done
 	p.mu.Unlock()
@@ -145,5 +145,16 @@ func (p *Peer) requestBlock(ctx context.Context, br *blockRequest) error {
 		return ctx.Err()
 	case err := <-done:
 		return err
+	}
+}
+
+func (p *Peer) completeRequest(br *blockRequest, err error) {
+	slog.Debug("completeRequest", "index", br.index, "begin", br.begin, "length", br.length, "err", err)
+	if done, ok := p.inflightRequests[*br]; ok {
+		if err != nil {
+			done <- err
+		}
+		close(done)
+		delete(p.inflightRequests, *br)
 	}
 }

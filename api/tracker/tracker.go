@@ -165,3 +165,7 @@ type Peer struct {
 	IP   string `bencode:"ip"`
 	Port int    `bencode:"port"`
 }
+
+func (p *Peer) Addr() string {
+	return fmt.Sprintf("%s:%d", p.IP, p.Port)
+}

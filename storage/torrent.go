@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -146,6 +147,7 @@ func (p *Piece) fail(err error) {
 
 func (p *Piece) reset() {
 	if !p.coalesced {
+		p.fail(errors.New("piece closed"))
 		p.Done = make(chan struct{})
 	}
 	p.err = nil
