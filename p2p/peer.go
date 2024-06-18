@@ -33,11 +33,21 @@ func DialTCP(peer *tracker.Peer) (*Peer, error) {
 		return nil, fmt.Errorf("DialTCP: %w", err)
 	}
 	return &Peer{
-		Conn:         conn,
-		ID:           peer.ID,
-		RemoteChoked: true,
-		Choked:       true,
+		Conn:             conn,
+		ID:               peer.ID,
+		RemoteChoked:     true,
+		Choked:           true,
+		inflightRequests: map[blockRequest]chan error{},
 	}, nil
+}
+
+func FromConn(conn net.Conn) *Peer {
+	return &Peer{
+		Conn:             conn,
+		RemoteChoked:     true,
+		Choked:           true,
+		inflightRequests: map[blockRequest]chan error{},
+	}
 }
 
 func (p *Peer) Handshake(hs *peerapi.Handshake) error {
