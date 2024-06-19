@@ -107,21 +107,21 @@ const (
 	CANCEL         MessageType = 8
 )
 
-var typeToName = map[MessageType]string{
-	-1: "KEEPALIVE",
-	0:  "CHOKE",
-	1:  "UNCHOKE",
-	2:  "INTERESTED",
-	3:  "NOT_INTERESTED",
-	4:  "HAVE",
-	5:  "BITFIELD",
-	6:  "REQUEST",
-	7:  "PIECE",
-	8:  "CANCEL",
+var typeName = map[MessageType]string{
+	KEEPALIVE:      "KEEPALIVE",
+	CHOKE:          "CHOKE",
+	UNCHOKE:        "UNCHOKE",
+	INTERESTED:     "INTERESTED",
+	NOT_INTERESTED: "NOT_INTERESTED",
+	HAVE:           "HAVE",
+	BITFIELD:       "BITFIELD",
+	REQUEST:        "REQUEST",
+	PIECE:          "PIECE",
+	CANCEL:         "CANCEL",
 }
 
 func (m MessageType) String() string {
-	n, ok := typeToName[m]
+	n, ok := typeName[m]
 	if !ok {
 		panic("unknown message type")
 	}
@@ -318,11 +318,19 @@ func (m *Message) Encode(w io.Writer) error {
 		binary.BigEndian.PutUint32(fixedData[9:13], uint32(m.begin))
 		variableData = m.piece
 	}
-	if _, err := w.Write(fixedData); err != nil {
+	n, err := w.Write(fixedData)
+	if err != nil {
 		return err
 	}
-	if _, err := w.Write(variableData); err != nil {
+	if n < len(fixedData) {
+		panic(fmt.Sprintf("Encode: %d < %d", n, len(fixedData)))
+	}
+	n, err = w.Write(variableData)
+	if err != nil {
 		return err
+	}
+	if n < len(variableData) {
+		panic(fmt.Sprintf("Encode: %d < %d", n, len(variableData)))
 	}
 	return nil
 }
