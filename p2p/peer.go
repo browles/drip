@@ -20,6 +20,7 @@ type Peer struct {
 	RemoteChoked     bool
 	RemoteInterested bool
 	Choked           bool
+	Interested       bool
 	Bitfield         bitfield.Bitfield
 
 	mu               sync.Mutex
@@ -72,8 +73,12 @@ func (p *Peer) Handshake(hs *peerapi.Handshake) error {
 }
 
 func (p *Peer) Send(m *peerapi.Message) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	defer slog.Debug("Send", "peer", p.ID, "message", m)
-	p.SetReadDeadline(time.Now().Add(2 * time.Minute))
+	if m.Type != peerapi.KEEPALIVE {
+		p.SetReadDeadline(time.Now().Add(2 * time.Minute))
+	}
 	return peerapi.Write(p.Conn, m)
 }
 
@@ -102,35 +107,46 @@ func (p *Peer) Receive() (m *peerapi.Message, err error) {
 }
 
 func (p *Peer) Keepalive() error {
-	return peerapi.Write(p.Conn, peerapi.Keepalive())
+	return p.Send(peerapi.Keepalive())
 }
 
 func (p *Peer) Choke() error {
 	p.Choked = true
-	return peerapi.Write(p.Conn, peerapi.Choke())
+	return p.Send(peerapi.Choke())
 }
 
 func (p *Peer) Unchoke() error {
 	p.Choked = false
-	return peerapi.Write(p.Conn, peerapi.Unchoke())
+	return p.Send(peerapi.Unchoke())
 }
 
-func (p *Peer) RequestBlock(ctx context.Context, br *blockRequest) error {
+func (p *Peer) Interest() error {
+	p.Interested = true
+	return p.Send(peerapi.Interested())
+}
+
+func (p *Peer) NotInterest() error {
+	p.Interested = false
+	return p.Send(peerapi.NotInterested())
+}
+
+func (p *Peer) RequestBlock(ctx context.Context, br *blockRequest) (err error) {
 	if p.RemoteChoked {
 		return ErrChoked
-	}
-	p.mu.Lock()
-	if _, ok := p.inflightRequests[*br]; ok {
-		p.mu.Unlock()
-		return nil
 	}
 	start := time.Now()
 	slog.Debug("RequestBlock", "index", br.index, "begin", br.begin, "length", br.length)
 	defer func() {
-		slog.Debug("RequestBlock.time", "index", br.index, "begin", br.begin, "length", br.length, "time", time.Since(start))
+		if err == nil {
+			slog.Debug("RequestBlock.time", "index", br.index, "begin", br.begin, "length", br.length, "time", time.Since(start))
+		}
 	}()
-	done := make(chan error)
-	p.inflightRequests[*br] = done
+	p.mu.Lock()
+	done, ok := p.inflightRequests[*br]
+	if !ok {
+		done := make(chan error)
+		p.inflightRequests[*br] = done
+	}
 	p.mu.Unlock()
 	defer func() {
 		p.mu.Lock()

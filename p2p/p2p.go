@@ -26,17 +26,11 @@ type Peer2PeerServer struct {
 	mu               sync.Mutex
 	knownPeers       map[string]*tracker.Peer
 	deniedPeers      map[string]struct{}
-	activePeers      map[string]*peerWithCancel
+	activePeers      map[string]*Peer
 	indexToPeers     map[int]map[string]struct{}
 	cancelsToPeerIDs map[blockRequest]map[string]struct{}
 
-	errors chan error
-	tcp    net.Listener
-}
-
-type peerWithCancel struct {
-	*Peer
-	cancel context.CancelFunc
+	tcp net.Listener
 }
 
 type blockRequest struct {
@@ -67,11 +61,9 @@ func New(info *metainfo.Info, peerID [20]byte, storage *storage.Storage, port in
 
 		knownPeers:       make(map[string]*tracker.Peer),
 		deniedPeers:      make(map[string]struct{}),
-		activePeers:      make(map[string]*peerWithCancel),
+		activePeers:      make(map[string]*Peer),
 		indexToPeers:     make(map[int]map[string]struct{}),
 		cancelsToPeerIDs: make(map[blockRequest]map[string]struct{}),
-
-		errors: make(chan error),
 	}
 }
 
@@ -85,44 +77,43 @@ func (p2p *Peer2PeerServer) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("Listening on port: %d", p2p.Port)
-	go p2p.every(ctx, func() error { return p2p.DialPeers(ctx) }, 10*time.Second)
-	go p2p.every(ctx, func() error { return p2p.UnchokePeers() }, 10*time.Second)
-	go p2p.every(ctx, func() error { return p2p.RequestPieces(ctx) }, 10*time.Second)
-	go p2p.Listen(ctx)
-	go p2p.HandleErrors(ctx)
+	slog.Info("Start.Listen", "network", "tcp", "port", p2p.Port)
+	errors := make(chan error)
+	go p2p.every(ctx, errors, func() error { return p2p.DialPeers(ctx) }, 10*time.Second)
+	go p2p.every(ctx, errors, func() error { return p2p.UnchokePeers() }, 10*time.Second)
+	go p2p.every(ctx, errors, func() error { return p2p.RequestPieces(ctx) }, 10*time.Second)
+	go p2p.Listen(ctx, errors)
+	go p2p.HandleErrors(ctx, errors)
 	return nil
 }
 
 func (p2p *Peer2PeerServer) DialPeers(ctx context.Context) error {
 	p2p.mu.Lock()
-	active := len(p2p.activePeers)
-	p2p.mu.Unlock()
-	if active >= 50 {
+	if len(p2p.activePeers) >= 50 {
+		p2p.mu.Unlock()
 		return nil
 	}
-	p2p.mu.Lock()
 	var newPeers []*tracker.Peer
-	for _, tp := range p2p.knownPeers {
-		if _, ok := p2p.activePeers[tp.Addr()]; !ok {
-			newPeers = append(newPeers, tp)
+	for addr, tp := range p2p.knownPeers {
+		if _, ok := p2p.activePeers[addr]; !ok {
+			if _, ok := p2p.deniedPeers[addr]; !ok {
+				newPeers = append(newPeers, tp)
+			}
 		}
 	}
 	p2p.mu.Unlock()
 	for _, tp := range newPeers {
 		peer, err := DialTCP(tp)
 		if err != nil {
-			return err
+			slog.Error("DialPeers", "ip", tp.IP, "port", tp.Port, "err", err)
+			continue
 		}
-		if err = p2p.Connect(ctx, peer); err != nil {
-			return err
-		}
+		go p2p.HandlePeer(ctx, peer)
 	}
 	return nil
 }
 
-// TODO refactor: combine Listen, Connect, and HandlePeer
-func (p2p *Peer2PeerServer) Listen(ctx context.Context) {
+func (p2p *Peer2PeerServer) Listen(ctx context.Context, errors chan error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -131,17 +122,15 @@ func (p2p *Peer2PeerServer) Listen(ctx context.Context) {
 		}
 		conn, err := p2p.tcp.Accept()
 		if err != nil {
-			p2p.errors <- err
+			errors <- err
+			return
 		}
-		peer := FromConn(conn)
-		if err := p2p.Connect(ctx, peer); err != nil {
-			p2p.errors <- &PeerError{peer, err}
-		}
+		go p2p.HandlePeer(ctx, FromConn(conn))
 	}
 }
 
 func (p2p *Peer2PeerServer) UnchokePeers() error {
-	var choked []*peerWithCancel
+	var choked []*Peer
 	p2p.mu.Lock()
 	for _, p := range p2p.activePeers {
 		if p.Choked {
@@ -172,7 +161,6 @@ outer:
 			p2p.mu.Lock()
 			p, ok := p2p.activePeers[addr]
 			if !ok {
-				log.Print("Addr disappeared: " + addr)
 				delete(p2p.indexToPeers[i], addr)
 				p2p.mu.Unlock()
 				continue
@@ -181,9 +169,9 @@ outer:
 			if p.RemoteChoked {
 				continue
 			}
-			err := p2p.requestPiece(ctx, p.Peer, i)
+			err := p2p.requestPiece(ctx, p, i)
 			if err != nil {
-				return &PeerError{p.Peer, err}
+				return &PeerError{p, err}
 			}
 			continue outer
 		}
@@ -191,17 +179,17 @@ outer:
 	return nil
 }
 
-func (p2p *Peer2PeerServer) HandleErrors(ctx context.Context) {
+func (p2p *Peer2PeerServer) HandleErrors(ctx context.Context, errors chan error) {
 	for {
 		var err error
 		select {
 		case <-ctx.Done():
 			return
-		case err = <-p2p.errors:
+		case err = <-errors:
+			slog.Error("HandleErrors", "err", err)
 			if pe, ok := err.(*PeerError); ok {
-				slog.Error("HandleErrors", "err", pe.Error())
 				if err := p2p.Disconnect(pe.Peer); err != nil {
-					slog.Error("Disconnect", "err", pe.Error())
+					slog.Error("HandleErrors.Disconnect", "err", pe.Error())
 				}
 				continue
 			} else {
@@ -211,22 +199,40 @@ func (p2p *Peer2PeerServer) HandleErrors(ctx context.Context) {
 	}
 }
 
-func (p2p *Peer2PeerServer) AddPeer(p *tracker.Peer) {
-	p2p.mu.Lock()
-	defer p2p.mu.Unlock()
-	if _, ok := p2p.knownPeers[p.Addr()]; ok {
-		return
+func addr(tp *tracker.Peer) (string, error) {
+	ip := net.ParseIP(tp.IP)
+	if ip == nil {
+		return "", errors.New("bad ip")
 	}
-	p2p.knownPeers[p.Addr()] = p
+	return fmt.Sprintf("%s:%d", ip.String(), tp.Port), nil
 }
 
-func (p2p *Peer2PeerServer) RemovePeer(p *tracker.Peer) {
+func (p2p *Peer2PeerServer) AddPeer(tp *tracker.Peer) error {
 	p2p.mu.Lock()
 	defer p2p.mu.Unlock()
-	delete(p2p.knownPeers, p.Addr())
+	addr, err := addr(tp)
+	if err != nil {
+		return err
+	}
+	if _, ok := p2p.knownPeers[addr]; ok {
+		return nil
+	}
+	p2p.knownPeers[addr] = tp
+	return nil
 }
 
-func (p2p *Peer2PeerServer) Connect(ctx context.Context, peer *Peer) error {
+func (p2p *Peer2PeerServer) RemovePeer(tp *tracker.Peer) error {
+	p2p.mu.Lock()
+	defer p2p.mu.Unlock()
+	addr, err := addr(tp)
+	if err != nil {
+		return err
+	}
+	delete(p2p.knownPeers, addr)
+	return nil
+}
+
+func (p2p *Peer2PeerServer) Connect(peer *Peer) error {
 	hs := &peerapi.Handshake{
 		InfoHash: p2p.Info.SHA1,
 		PeerID:   p2p.PeerID,
@@ -239,30 +245,17 @@ func (p2p *Peer2PeerServer) Connect(ctx context.Context, peer *Peer) error {
 	if err := peer.Send(peerapi.Bitfield(torrent.Bitfield())); err != nil {
 		return &PeerError{peer, err}
 	}
-	ctx, cancel := context.WithCancel(ctx)
 	p2p.mu.Lock()
-	p2p.activePeers[peer.RemoteAddr().String()] = &peerWithCancel{peer, cancel}
+	p2p.activePeers[peer.RemoteAddr().String()] = peer
 	p2p.mu.Unlock()
-	go p2p.HandlePeer(ctx, peer)
-	go p2p.every(ctx, func() error {
-		return p2p.keepalive(peer)
-	}, 2*time.Minute)
-	return nil
-}
-
-func (p2p *Peer2PeerServer) keepalive(peer *Peer) error {
-	if err := peer.Keepalive(); err != nil {
-		return &PeerError{peer, err}
-	}
 	return nil
 }
 
 func (p2p *Peer2PeerServer) Disconnect(peer *Peer) error {
 	p2p.mu.Lock()
 	defer p2p.mu.Unlock()
-	if pwc, ok := p2p.activePeers[peer.RemoteAddr().String()]; ok {
+	if _, ok := p2p.activePeers[peer.RemoteAddr().String()]; ok {
 		slog.Debug("Disconnect", "peer", peer.ID)
-		pwc.cancel()
 	} else {
 		return nil
 	}
@@ -279,32 +272,46 @@ func (p2p *Peer2PeerServer) Deny(peer *Peer) error {
 		return err
 	}
 	p2p.mu.Lock()
-	p2p.deniedPeers[peer.ID] = struct{}{}
+	p2p.deniedPeers[peer.RemoteAddr().String()] = struct{}{}
 	p2p.mu.Unlock()
 	return nil
 }
 
 func (p2p *Peer2PeerServer) HandlePeer(ctx context.Context, peer *Peer) {
+	err := p2p.Connect(peer)
+	if err != nil {
+		slog.Error("HandlePeer", "err", err)
+		return
+	}
+	errors := make(chan error)
+	go p2p.every(ctx, errors, peer.Keepalive, 2*time.Minute)
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case err := <-errors:
+			if err != nil {
+				slog.Error("HandlePeer", "err", err)
+				if err := p2p.Disconnect(peer); err != nil {
+					slog.Error("HandlePeer.Disconnect", "err", err)
+				}
+				return
+			}
 		default:
 		}
 		m, err := peer.Receive()
 		if err != nil {
-			p2p.errors <- &PeerError{peer, err}
+			slog.Error("HandlePeer", "err", err)
+			if err := p2p.Disconnect(peer); err != nil {
+				slog.Error("HandlePeer.Disconnect", "err", err)
+			}
 			return
 		}
-		err = p2p.HandleMessage(peer, m)
-		if err != nil {
-			p2p.errors <- &PeerError{peer, err}
-			return
-		}
+		p2p.HandleMessage(ctx, errors, peer, m)
 	}
 }
 
-func (p2p *Peer2PeerServer) HandleMessage(peer *Peer, m *peerapi.Message) error {
+func (p2p *Peer2PeerServer) HandleMessage(ctx context.Context, errors chan error, peer *Peer, m *peerapi.Message) {
 	switch m.Type {
 	case peerapi.KEEPALIVE:
 	case peerapi.CHOKE:
@@ -323,13 +330,12 @@ func (p2p *Peer2PeerServer) HandleMessage(peer *Peer, m *peerapi.Message) error 
 			p2p.HandleHave(peer, i)
 		}
 	case peerapi.REQUEST:
-		p2p.HandleRequest(peer, m.Index(), m.Begin(), m.Length())
+		p2p.HandleRequest(ctx, errors, peer, m.Index(), m.Begin(), m.Length())
 	case peerapi.CANCEL:
 		p2p.HandleCancel(peer, m.Index(), m.Begin(), m.Length())
 	case peerapi.PIECE:
-		p2p.HandlePiece(peer, m.Index(), m.Begin(), m.Piece())
+		p2p.HandlePiece(ctx, errors, peer, m.Index(), m.Begin(), m.Piece())
 	}
-	return nil
 }
 
 func (p2p *Peer2PeerServer) HandleHave(peer *Peer, i int) {
@@ -344,8 +350,12 @@ func (p2p *Peer2PeerServer) HandleHave(peer *Peer, i int) {
 	m[peer.RemoteAddr().String()] = struct{}{}
 }
 
-func (p2p *Peer2PeerServer) HandleRequest(peer *Peer, index, begin, length int) {
-	p2p.sendBlock(peer, index, begin, length)
+func (p2p *Peer2PeerServer) HandleRequest(ctx context.Context, errors chan error, peer *Peer, index, begin, length int) {
+	go func() {
+		if err := p2p.sendBlock(peer, index, begin, length); err != nil {
+			errors <- err
+		}
+	}()
 }
 
 func (p2p *Peer2PeerServer) HandleCancel(peer *Peer, index, begin, length int) {
@@ -360,24 +370,21 @@ func (p2p *Peer2PeerServer) HandleCancel(peer *Peer, index, begin, length int) {
 	m[peer.ID] = struct{}{}
 }
 
-func (p2p *Peer2PeerServer) HandlePiece(peer *Peer, index, begin int, piece []byte) {
-	p2p.storePiece(peer, index, begin, piece)
+func (p2p *Peer2PeerServer) HandlePiece(ctx context.Context, errors chan error, peer *Peer, index, begin int, piece []byte) {
+	go func() {
+		if err := p2p.storePiece(peer, index, begin, piece); err != nil {
+			errors <- err
+		}
+	}()
 }
-
-// Elastic queue?:
-// n = 4
-// expected = 64kps
-// fire off n requests, start = now()
-// after last completes, delta = time.since(start)
-// rate = n*blocksize / delta
-// n *= clamp(rate / expected, 0.5, 2.0)
-// expected = rate
 
 func (p2p *Peer2PeerServer) requestPiece(ctx context.Context, peer *Peer, index int) (err error) {
 	start := time.Now()
 	slog.Debug("requestPiece", "peer", peer.ID, "index", index)
 	defer func() {
-		slog.Debug("requestPiece.time", "peer", peer.ID, "index", index, "time", time.Since(start), "err", err)
+		if err == nil {
+			slog.Debug("requestPiece.time", "peer", peer.ID, "index", index, "time", time.Since(start))
+		}
 	}()
 	piece := p2p.Storage.GetPiece(p2p.Info.SHA1, index)
 	piece.Reset()
@@ -392,7 +399,7 @@ func (p2p *Peer2PeerServer) requestPiece(ctx context.Context, peer *Peer, index 
 		go func(begin, blockLength int) {
 			defer wg.Done()
 			defer func() { <-semaphore }()
-			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			err := peer.RequestBlock(ctx, &blockRequest{index, begin, blockLength})
 			if err != nil {
@@ -428,47 +435,44 @@ func (p2p *Peer2PeerServer) requestPiece(ctx context.Context, peer *Peer, index 
 	return nil
 }
 
-func (p2p *Peer2PeerServer) sendBlock(peer *Peer, index, begin, length int) {
+func (p2p *Peer2PeerServer) sendBlock(peer *Peer, index, begin, length int) error {
 	if peer.Choked {
-		return // Peer is not allowed requests
+		return ErrChoked
 	}
 	req := blockRequest{index, begin, length}
 	p2p.mu.Lock()
 	if _, ok := p2p.cancelsToPeerIDs[req][peer.ID]; ok {
 		delete(p2p.cancelsToPeerIDs[req], peer.ID)
 		p2p.mu.Unlock()
-		return
+		return nil
 	}
 	p2p.mu.Unlock()
 	data, err := p2p.Storage.GetBlock(p2p.Info.SHA1, req.index, req.begin, req.length)
 	if err != nil {
-		p2p.errors <- &PeerError{peer, err}
-		return
+		return err
 	}
 	err = peer.Send(peerapi.Piece(req.index, req.begin, data))
 	if err != nil {
-		p2p.errors <- &PeerError{peer, err}
-		return
+		return err
 	}
+	return nil
 	// todo: record stats
 }
 
-func (p2p *Peer2PeerServer) storePiece(peer *Peer, index, begin int, data []byte) {
+func (p2p *Peer2PeerServer) storePiece(peer *Peer, index, begin int, data []byte) error {
 	err := p2p.Storage.PutBlock(p2p.Info.SHA1, index, begin, data)
-	if err != nil {
-		if !errors.Is(err, storage.ErrBlockExists) {
-			p2p.errors <- &PeerError{peer, err}
-		}
-		return
+	if err != nil && !errors.Is(err, storage.ErrBlockExists) {
+		return err
 	}
+	return nil
 	// todo: record stats
 }
 
-func (p2p *Peer2PeerServer) every(ctx context.Context, f func() error, d time.Duration) {
+func (p2p *Peer2PeerServer) every(ctx context.Context, errors chan error, f func() error, d time.Duration) {
 	ticker := time.NewTicker(d)
 	defer ticker.Stop()
 	if err := f(); err != nil {
-		p2p.errors <- err
+		errors <- err
 	}
 	for {
 		select {
@@ -477,7 +481,7 @@ func (p2p *Peer2PeerServer) every(ctx context.Context, f func() error, d time.Du
 		case <-ticker.C:
 		}
 		if err := f(); err != nil {
-			p2p.errors <- err
+			errors <- err
 		}
 	}
 }
