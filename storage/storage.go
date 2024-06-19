@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/browles/drip/api/metainfo"
 )
@@ -19,9 +18,7 @@ const BLOCK_LENGTH = 1 << 14
 type Storage struct {
 	TargetDir string
 	WorkDir   string
-
-	mu       sync.RWMutex
-	torrents map[[20]byte]*Torrent
+	Torrent   *Torrent
 }
 
 var (
@@ -30,34 +27,28 @@ var (
 	ErrUnknownTorrent  = errors.New("storage: unknown info hash")
 )
 
-func New(targetDir, workDir string) *Storage {
+func New(targetDir, workDir string, info *metainfo.Info) *Storage {
 	return &Storage{
 		TargetDir: targetDir,
 		WorkDir:   workDir,
-		torrents:  make(map[[20]byte]*Torrent),
+		Torrent:   newTorrent(info),
 	}
 }
 
-func (s *Storage) AddTorrent(info *metainfo.Info) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.torrents[info.SHA1]; ok {
-		return nil
-	}
-	torrent := newTorrent(info)
-	_, err := os.Stat(filepath.Join(s.TargetDir, torrent.FileName()))
+func (s *Storage) Load() error {
+	_, err := os.Stat(filepath.Join(s.TargetDir, s.Torrent.FileName()))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if err == nil {
-		// Complete torrent exists on disk
-		for i := range len(torrent.Info.Pieces) {
-			torrent.completePiece(torrent.pieces[i])
+		// Complete s.Torrent exists on disk
+		for i := range len(s.Torrent.Info.Pieces) {
+			s.Torrent.completePiece(s.Torrent.pieces[i])
 		}
-		torrent.complete()
+		s.Torrent.complete()
 	} else {
 		// Check for complete pieces on disk
-		direntries, err := os.ReadDir(filepath.Join(s.WorkDir, torrent.WorkDir()))
+		direntries, err := os.ReadDir(filepath.Join(s.WorkDir, s.Torrent.WorkDir()))
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -68,72 +59,59 @@ func (s *Storage) AddTorrent(info *metainfo.Info) error {
 				if err != nil {
 					continue
 				}
-				torrent.completePiece(torrent.pieces[i])
+				s.Torrent.completePiece(s.Torrent.pieces[i])
 			}
-			if err = s.coalescePieces(torrent); err != nil {
+			if err = s.coalescePieces(); err != nil {
 				return err
 			}
 		}
 	}
-	s.torrents[info.SHA1] = torrent
 	return nil
 }
 
-func (s *Storage) GetTorrent(infohash [20]byte) *Torrent {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	torrent, ok := s.torrents[infohash]
-	if !ok {
-		panic(ErrUnknownTorrent)
-	}
-	return torrent
+func (s *Storage) GetPiece(index int) *Piece {
+	return s.Torrent.pieces[index]
 }
 
-func (s *Storage) GetPiece(infoHash [20]byte, index int) *Piece {
-	return s.GetTorrent(infoHash).pieces[index]
-}
-
-func (s *Storage) GetBlock(infoHash [20]byte, index, begin, length int) ([]byte, error) {
-	torrent := s.GetTorrent(infoHash)
-	slog.Debug("GetBlock", "name", torrent.Info.Name, "index", index, "begin", begin, "length", length)
-	torrent.mu.RLock()
-	defer torrent.mu.RUnlock()
-	if torrent.coalesced {
-		return s.getBlockFromTorrent(torrent, index, begin, length)
+func (s *Storage) GetBlock(index, begin, length int) ([]byte, error) {
+	slog.Debug("GetBlock", "name", s.Torrent.Info.Name, "index", index, "begin", begin, "length", length)
+	s.Torrent.mu.RLock()
+	defer s.Torrent.mu.RUnlock()
+	if s.Torrent.coalesced {
+		return s.getBlockFromTorrent(index, begin, length)
 	}
-	piece := torrent.pieces[index]
+	piece := s.Torrent.pieces[index]
 	piece.mu.RLock()
 	defer piece.mu.RUnlock()
 	if !piece.coalesced {
 		return nil, ErrIncompletePiece
 	}
-	return s.getBlockFromPiece(torrent, piece, begin, length)
+	return s.getBlockFromPiece(piece, begin, length)
 }
 
-func (s *Storage) PutBlock(infoHash [20]byte, index, begin int, data []byte) error {
-	torrent := s.GetTorrent(infoHash)
-	slog.Debug("PutBlock", "name", torrent.Info.Name, "index", index, "begin", begin, "length", len(data), "data", "<omitted>")
-	if err := checkBlockSize(torrent.Info, index, begin, len(data)); err != nil {
+func (s *Storage) PutBlock(index, begin int, data []byte) error {
+	slog.Debug("PutBlock", "name", s.Torrent.Info.Name, "index", index, "begin", begin, "length", len(data), "data", "<omitted>")
+	if err := checkBlockSize(s.Torrent.Info, index, begin, len(data)); err != nil {
 		return err
 	}
-	torrent.mu.RLock()
-	if torrent.coalesced {
-		torrent.mu.RUnlock()
+	s.Torrent.mu.RLock()
+	if s.Torrent.coalesced {
+		s.Torrent.mu.RUnlock()
 		return ErrBlockExists
 	}
-	torrent.mu.RUnlock()
-	piece := torrent.pieces[index]
+	s.Torrent.mu.RUnlock()
+	piece := s.Torrent.pieces[index]
 	piece.mu.Lock()
 	defer piece.mu.Unlock()
 	if err := piece.putBlock(begin, data); err != nil {
 		return err
 	}
-	torrent.mu.Lock()
-	defer torrent.mu.Unlock()
-	if err := s.coalesceBlocks(torrent, piece); err != nil {
+	s.Torrent.mu.Lock()
+	defer s.Torrent.mu.Unlock()
+	if err := s.coalesceBlocks(piece); err != nil {
 		return err
 	}
-	if err := s.coalescePieces(torrent); err != nil {
+	if err := s.coalescePieces(); err != nil {
 		return err
 	}
 	return nil
@@ -149,22 +127,22 @@ func (cse *ChecksumError) Error() string {
 	return fmt.Sprintf("storage: SHA1 does not match target, piece=%d: got %x != want %x", cse.Index, cse.Got, cse.Want)
 }
 
-func (s *Storage) getBlockFromTorrent(torrent *Torrent, index, begin, length int) ([]byte, error) {
-	if len(torrent.Info.Files) > 0 {
-		return s.getBlockFromMultiFile(torrent, index, begin, length)
+func (s *Storage) getBlockFromTorrent(index, begin, length int) ([]byte, error) {
+	if len(s.Torrent.Info.Files) > 0 {
+		return s.getBlockFromMultiFile(index, begin, length)
 	}
-	return s.getBlockFromSingleFile(torrent, index, begin, length)
+	return s.getBlockFromSingleFile(index, begin, length)
 }
 
-func (s *Storage) getBlockFromSingleFile(torrent *Torrent, index, begin, length int) ([]byte, error) {
-	filename := filepath.Join(s.TargetDir, torrent.FileName())
+func (s *Storage) getBlockFromSingleFile(index, begin, length int) ([]byte, error) {
+	filename := filepath.Join(s.TargetDir, s.Torrent.FileName())
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 	data := make([]byte, length)
-	offset := index*torrent.Info.PieceLength + begin
+	offset := index*s.Torrent.Info.PieceLength + begin
 	n, err := f.ReadAt(data, int64(offset))
 	if err != nil {
 		return nil, err
@@ -175,13 +153,13 @@ func (s *Storage) getBlockFromSingleFile(torrent *Torrent, index, begin, length 
 	return data, nil
 }
 
-func (s *Storage) getBlockFromMultiFile(torrent *Torrent, index, begin, length int) ([]byte, error) {
+func (s *Storage) getBlockFromMultiFile(index, begin, length int) ([]byte, error) {
 	curr := 0
 	data := make([]byte, length)
 	var total int64
-	start := index*torrent.Info.PieceLength + begin
+	start := index*s.Torrent.Info.PieceLength + begin
 	end := start + length
-	for _, file := range torrent.Info.Files {
+	for _, file := range s.Torrent.Info.Files {
 		if total >= int64(end) {
 			break
 		}
@@ -190,7 +168,7 @@ func (s *Storage) getBlockFromMultiFile(torrent *Torrent, index, begin, length i
 			if total < int64(start) {
 				offset = start - int(total)
 			}
-			fp := append([]string{s.TargetDir, torrent.FileName()}, file.Path...)
+			fp := append([]string{s.TargetDir, s.Torrent.FileName()}, file.Path...)
 			f, err := os.Open(filepath.Join(fp...))
 			if err != nil {
 				return nil, err
@@ -210,8 +188,8 @@ func (s *Storage) getBlockFromMultiFile(torrent *Torrent, index, begin, length i
 	return data, nil
 }
 
-func (s *Storage) getBlockFromPiece(torrent *Torrent, piece *Piece, begin, length int) ([]byte, error) {
-	f, err := os.Open(filepath.Join(s.WorkDir, torrent.WorkDir(), piece.FileName()))
+func (s *Storage) getBlockFromPiece(piece *Piece, begin, length int) ([]byte, error) {
+	f, err := os.Open(filepath.Join(s.WorkDir, s.Torrent.WorkDir(), piece.FileName()))
 	if err != nil {
 		return nil, err
 	}
@@ -240,16 +218,16 @@ func checkBlockSize(info *metainfo.Info, index, begin, length int) error {
 	return nil
 }
 
-func (s *Storage) coalesceBlocks(torrent *Torrent, piece *Piece) error {
+func (s *Storage) coalesceBlocks(piece *Piece) error {
 	if piece.completeBlocks != len(piece.blocks) {
 		return nil
 	}
-	slog.Debug("coalesceBlocks", "name", torrent.Info.Name, "piece", piece.Index)
+	slog.Debug("coalesceBlocks", "name", s.Torrent.Info.Name, "piece", piece.Index)
 	tempDir := filepath.Join(s.WorkDir, "temp")
 	if err := os.MkdirAll(tempDir, 0o0700); err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(tempDir, torrent.WorkDir()+"-"+piece.FileName())
+	temp, err := os.CreateTemp(tempDir, s.Torrent.WorkDir()+"-"+piece.FileName())
 	if err != nil {
 		return err
 	}
@@ -270,74 +248,74 @@ func (s *Storage) coalesceBlocks(torrent *Torrent, piece *Piece) error {
 	if hash != piece.SHA1 {
 		return &ChecksumError{piece.Index, hash, piece.SHA1}
 	}
-	if err = os.MkdirAll(filepath.Join(s.WorkDir, torrent.WorkDir()), 0o0700); err != nil {
+	if err = os.MkdirAll(filepath.Join(s.WorkDir, s.Torrent.WorkDir()), 0o0700); err != nil {
 		return err
 	}
-	if err = os.Rename(temp.Name(), filepath.Join(s.WorkDir, torrent.WorkDir(), piece.FileName())); err != nil {
+	if err = os.Rename(temp.Name(), filepath.Join(s.WorkDir, s.Torrent.WorkDir(), piece.FileName())); err != nil {
 		return err
 	}
-	torrent.completePiece(piece)
+	s.Torrent.completePiece(piece)
 	return nil
 }
 
-func (s *Storage) coalescePieces(torrent *Torrent) error {
-	if torrent.completePieces != len(torrent.pieces) {
+func (s *Storage) coalescePieces() error {
+	if s.Torrent.completePieces != len(s.Torrent.pieces) {
 		return nil
 	}
-	slog.Debug("coalescePieces", "name", torrent.Info.Name)
-	if len(torrent.Info.Files) > 0 {
-		return s.coalescePiecesForMultiFile(torrent)
+	slog.Debug("coalescePieces", "name", s.Torrent.Info.Name)
+	if len(s.Torrent.Info.Files) > 0 {
+		return s.coalescePiecesForMultiFile()
 	}
-	return s.coalescePiecesForSingleFile(torrent)
+	return s.coalescePiecesForSingleFile()
 }
 
-func (s *Storage) coalescePiecesForSingleFile(torrent *Torrent) error {
+func (s *Storage) coalescePiecesForSingleFile() error {
 	tempDir := filepath.Join(s.WorkDir, "temp")
 	if err := os.MkdirAll(tempDir, 0o0700); err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(tempDir, torrent.FileName())
+	temp, err := os.CreateTemp(tempDir, s.Torrent.FileName())
 	if err != nil {
 		return err
 	}
 	defer os.Remove(temp.Name())
 	defer temp.Close()
 	var pieceReaders []io.Reader
-	for _, piece := range torrent.pieces {
-		path := filepath.Join(s.WorkDir, torrent.WorkDir(), piece.FileName())
+	for _, piece := range s.Torrent.pieces {
+		path := filepath.Join(s.WorkDir, s.Torrent.WorkDir(), piece.FileName())
 		pieceReaders = append(pieceReaders, &lazyFileReader{path: path})
 	}
 	r := io.MultiReader(pieceReaders...)
 	if _, err := io.Copy(temp, r); err != nil {
 		return err
 	}
-	if err = os.Rename(temp.Name(), filepath.Join(s.TargetDir, torrent.FileName())); err != nil {
+	if err = os.Rename(temp.Name(), filepath.Join(s.TargetDir, s.Torrent.FileName())); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(filepath.Join(s.WorkDir, torrent.WorkDir())); err != nil {
+	if err := os.RemoveAll(filepath.Join(s.WorkDir, s.Torrent.WorkDir())); err != nil {
 		return err
 	}
-	torrent.complete()
+	s.Torrent.complete()
 	return nil
 }
 
-func (s *Storage) coalescePiecesForMultiFile(torrent *Torrent) error {
+func (s *Storage) coalescePiecesForMultiFile() error {
 	tempDir := filepath.Join(s.WorkDir, "temp")
 	if err := os.MkdirAll(tempDir, 0o0700); err != nil {
 		return err
 	}
-	temp, err := os.MkdirTemp(tempDir, torrent.FileName())
+	temp, err := os.MkdirTemp(tempDir, s.Torrent.FileName())
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(temp)
 	var pieceReaders []io.Reader
-	for _, piece := range torrent.pieces {
-		path := filepath.Join(s.WorkDir, torrent.WorkDir(), piece.FileName())
+	for _, piece := range s.Torrent.pieces {
+		path := filepath.Join(s.WorkDir, s.Torrent.WorkDir(), piece.FileName())
 		pieceReaders = append(pieceReaders, &lazyFileReader{path: path})
 	}
 	r := io.MultiReader(pieceReaders...)
-	for _, file := range torrent.Info.Files {
+	for _, file := range s.Torrent.Info.Files {
 		fp := append([]string{temp}, file.Path...)
 		if err := os.MkdirAll(filepath.Join(fp[:len(fp)-1]...), 0o0700); err != nil {
 			return err
@@ -351,12 +329,12 @@ func (s *Storage) coalescePiecesForMultiFile(torrent *Torrent) error {
 		}
 		f.Close()
 	}
-	if err = os.Rename(temp, filepath.Join(s.TargetDir, torrent.FileName())); err != nil {
+	if err = os.Rename(temp, filepath.Join(s.TargetDir, s.Torrent.FileName())); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(filepath.Join(s.WorkDir, torrent.WorkDir())); err != nil {
+	if err := os.RemoveAll(filepath.Join(s.WorkDir, s.Torrent.WorkDir())); err != nil {
 		return err
 	}
-	torrent.complete()
+	s.Torrent.complete()
 	return nil
 }
