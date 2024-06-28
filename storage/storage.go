@@ -109,6 +109,7 @@ func (s *Storage) PutBlock(index, begin int, data []byte) error {
 	s.Torrent.mu.Lock()
 	defer s.Torrent.mu.Unlock()
 	if err := s.coalesceBlocks(piece); err != nil {
+		piece.done.Deliver(nil, err)
 		return err
 	}
 	if err := s.coalescePieces(); err != nil {

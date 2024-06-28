@@ -8,11 +8,12 @@ import (
 
 	"github.com/browles/drip/api/metainfo"
 	"github.com/browles/drip/bitfield"
+	"github.com/browles/drip/future"
 )
 
 type Torrent struct {
 	Info *metainfo.Info
-	done *future
+	done *future.Future[any]
 
 	mu             sync.RWMutex
 	bitfield       bitfield.Bitfield
@@ -24,7 +25,7 @@ type Torrent struct {
 func newTorrent(info *metainfo.Info) *Torrent {
 	torrent := &Torrent{
 		Info:   info,
-		done:   newFuture(),
+		done:   future.New[any](),
 		pieces: make([]*Piece, len(info.Pieces)),
 	}
 	for i := range len(info.Pieces) {
@@ -52,13 +53,13 @@ func (t *Torrent) GetPiece(index int) *Piece {
 }
 
 func (t *Torrent) Wait() error {
-	_, err := t.done.wait()
+	_, err := t.done.Wait()
 	return err
 }
 
 func (t *Torrent) completePiece(piece *Piece) {
 	piece.coalesced = true
-	piece.done.finalize(nil, nil)
+	piece.done.Deliver(nil, nil)
 	piece.blocks = nil
 	t.bitfield.Add(piece.Index)
 	t.completePieces++
@@ -66,7 +67,7 @@ func (t *Torrent) completePiece(piece *Piece) {
 
 func (t *Torrent) complete() {
 	t.coalesced = true
-	t.done.finalize(nil, nil)
+	t.done.Deliver(nil, nil)
 }
 
 type Piece struct {
@@ -78,7 +79,7 @@ type Piece struct {
 	coalesced      bool
 	completeBlocks int
 	blocks         []*block
-	done           *future
+	done           *future.Future[any]
 }
 
 func newPiece(info *metainfo.Info, index int) *Piece {
@@ -91,7 +92,7 @@ func newPiece(info *metainfo.Info, index int) *Piece {
 		SHA1:      info.Pieces[index],
 		Index:     index,
 		numBlocks: numBlocks,
-		done:      newFuture(),
+		done:      future.New[any](),
 	}
 }
 
@@ -103,15 +104,15 @@ func (p *Piece) Wait() error {
 	p.mu.RLock()
 	f := p.done
 	p.mu.RUnlock()
-	_, err := f.wait()
+	_, err := f.Wait()
 	return err
 }
 
 func (p *Piece) Reset() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.done.finalize(nil, errors.New("storage: piece reset"))
-	p.done = newFuture()
+	p.done.Deliver(nil, errors.New("storage: piece reset"))
+	p.done = future.New[any]()
 	p.blocks = nil
 	p.completeBlocks = 0
 }
@@ -140,24 +141,4 @@ type block struct {
 	index int
 	begin int
 	data  []byte
-}
-
-type future struct {
-	c   chan struct{}
-	res any
-	err error
-}
-
-func newFuture() *future {
-	return &future{c: make(chan struct{})}
-}
-
-func (p *future) finalize(res any, err error) {
-	p.res, p.err = res, err
-	close(p.c)
-}
-
-func (p *future) wait() (any, error) {
-	<-p.c
-	return p.res, p.err
 }
