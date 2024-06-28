@@ -10,7 +10,9 @@ import (
 
 	peerapi "github.com/browles/drip/api/peer"
 	"github.com/browles/drip/bitfield"
+	"github.com/browles/drip/future"
 	"github.com/browles/drip/storage"
+	"golang.org/x/sync/errgroup"
 )
 
 type Peer struct {
@@ -20,19 +22,24 @@ type Peer struct {
 	Choked           bool
 	Interested       bool
 	Bitfield         bitfield.Bitfield
+	Closed           bool
 
 	server *Server
 	cancel context.CancelFunc
 
 	mu sync.Mutex
 	net.Conn
-	inflightRequests map[blockRequest]chan error
+	inflightRequests map[blockRequest]*future.Future[any]
 	canceledRequests map[blockRequest]struct{}
 }
 
 var ErrChoked = errors.New("p2p: peer connection is choked")
 
 func (p *Peer) Close() error {
+	if p.Closed {
+		return nil
+	}
+	p.Closed = true
 	if p.cancel == nil {
 		panic(errors.New("peer missing cancel"))
 	}
@@ -41,7 +48,7 @@ func (p *Peer) Close() error {
 }
 
 func (p *Peer) Handshake(hs *peerapi.Handshake) error {
-	slog.Debug("Handshake", "id", p.ID)
+	slog.Debug("Handshake", "peer", p.RemoteAddr())
 	p.SetDeadline(time.Now().Add(10 * time.Second))
 	defer p.SetDeadline(time.Time{})
 	if err := peerapi.Write(p.Conn, hs); err != nil {
@@ -133,9 +140,13 @@ func (peer *Peer) serve(ctx context.Context) {
 		}
 		m, err := peer.Receive()
 		if err != nil {
+			slog.Error("serve.Receive", "err", err)
+			peer.server.Disconnect(peer)
 			return
 		}
 		if err = peer.HandleMessage(m); err != nil {
+			slog.Error("serve.HandleMessage", "err", err)
+			peer.server.Disconnect(peer)
 			return
 		}
 	}
@@ -230,44 +241,22 @@ func (peer *Peer) requestPiece(ctx context.Context, index int) (err error) {
 	pieceLength := peer.server.Info.GetPieceLength(index)
 	piece := peer.server.Storage.GetPiece(index)
 	piece.Reset()
-	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, 16) // todo: adaptive queue
-	errChan := make(chan error)
-	defer func() {
-		go func() {
-			for range errChan {
-			}
-		}()
-		wg.Wait()
-		close(errChan)
-	}()
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(16)
 	for begin := 0; begin < pieceLength; begin += storage.BLOCK_LENGTH {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err := <-errChan:
-			return err
-		default:
-		}
 		blockLength := min(storage.BLOCK_LENGTH, pieceLength-begin)
-		wg.Add(1)
-		semaphore <- struct{}{}
-		go func(begin, blockLength int) {
-			defer func() {
-				wg.Done()
-				<-semaphore
-			}()
-			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			defer cancel()
-			err := peer.requestBlock(ctx, &blockRequest{index, begin, blockLength})
-			if err != nil {
-				errChan <- err
-			}
+		func(begin, blockLength int) {
+			eg.Go(func() error {
+				ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				defer cancel()
+				return peer.requestBlock(ctx, &blockRequest{index, begin, blockLength})
+			})
 		}(begin, blockLength)
 	}
-	wg.Wait()
-	<-piece.Done
-	return piece.Err()
+	if err := eg.Wait(); err != nil {
+		return err
+	}
+	return piece.Wait()
 }
 
 func (p *Peer) requestBlock(ctx context.Context, br *blockRequest) (err error) {
@@ -282,10 +271,10 @@ func (p *Peer) requestBlock(ctx context.Context, br *blockRequest) (err error) {
 		}
 	}()
 	p.mu.Lock()
-	done, ok := p.inflightRequests[*br]
+	fut, ok := p.inflightRequests[*br]
 	if !ok {
-		done := make(chan error)
-		p.inflightRequests[*br] = done
+		fut = future.New[any]()
+		p.inflightRequests[*br] = fut
 	}
 	p.mu.Unlock()
 	defer func() {
@@ -299,18 +288,16 @@ func (p *Peer) requestBlock(ctx context.Context, br *blockRequest) (err error) {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case err := <-done:
+	case <-fut.Done:
+		_, err := fut.Wait()
 		return err
 	}
 }
 
 func (p *Peer) completeRequest(br *blockRequest, err error) {
 	slog.Debug("completeRequest", "index", br.index, "begin", br.begin, "length", br.length, "err", err)
-	if done, ok := p.inflightRequests[*br]; ok {
-		if err != nil {
-			done <- err
-		}
-		close(done)
+	if fut, ok := p.inflightRequests[*br]; ok {
+		fut.Deliver(nil, err)
 		delete(p.inflightRequests, *br)
 	}
 }
