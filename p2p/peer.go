@@ -29,7 +29,7 @@ type Peer struct {
 
 	mu sync.Mutex
 	net.Conn
-	inflightRequests map[blockRequest]*future.Future[any]
+	inflightRequests map[blockRequest]*future.Future[error]
 	canceledRequests map[blockRequest]struct{}
 }
 
@@ -273,7 +273,7 @@ func (p *Peer) requestBlock(ctx context.Context, br *blockRequest) (err error) {
 	p.mu.Lock()
 	fut, ok := p.inflightRequests[*br]
 	if !ok {
-		fut = future.New[any]()
+		fut = future.New[error]()
 		p.inflightRequests[*br] = fut
 	}
 	p.mu.Unlock()
@@ -289,15 +289,14 @@ func (p *Peer) requestBlock(ctx context.Context, br *blockRequest) (err error) {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-fut.Done:
-		_, err := fut.Wait()
-		return err
+		return fut.Wait()
 	}
 }
 
 func (p *Peer) completeRequest(br *blockRequest, err error) {
 	slog.Debug("completeRequest", "index", br.index, "begin", br.begin, "length", br.length, "err", err)
 	if fut, ok := p.inflightRequests[*br]; ok {
-		fut.Deliver(nil, err)
+		fut.Deliver(err)
 		delete(p.inflightRequests, *br)
 	}
 }

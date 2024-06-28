@@ -309,7 +309,7 @@ func (p2p *Server) fromConn(conn net.Conn) *Peer {
 		Conn:             conn,
 		RemoteChoked:     true,
 		Choked:           true,
-		inflightRequests: make(map[blockRequest]*future.Future[any]),
+		inflightRequests: make(map[blockRequest]*future.Future[error]),
 		canceledRequests: make(map[blockRequest]struct{}),
 	}
 }

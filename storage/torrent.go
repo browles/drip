@@ -13,19 +13,19 @@ import (
 
 type Torrent struct {
 	Info *metainfo.Info
-	done *future.Future[any]
 
 	mu             sync.RWMutex
 	bitfield       bitfield.Bitfield
 	coalesced      bool
 	completePieces int
 	pieces         []*Piece
+	err            *future.Future[error]
 }
 
 func newTorrent(info *metainfo.Info) *Torrent {
 	torrent := &Torrent{
 		Info:   info,
-		done:   future.New[any](),
+		err:    future.New[error](),
 		pieces: make([]*Piece, len(info.Pieces)),
 	}
 	for i := range len(info.Pieces) {
@@ -53,13 +53,15 @@ func (t *Torrent) GetPiece(index int) *Piece {
 }
 
 func (t *Torrent) Wait() error {
-	_, err := t.done.Wait()
-	return err
+	t.mu.Lock()
+	fut := t.err
+	t.mu.Unlock()
+	return fut.Wait()
 }
 
 func (t *Torrent) completePiece(piece *Piece) {
 	piece.coalesced = true
-	piece.done.Deliver(nil, nil)
+	piece.err.Deliver(nil)
 	piece.blocks = nil
 	t.bitfield.Add(piece.Index)
 	t.completePieces++
@@ -67,7 +69,7 @@ func (t *Torrent) completePiece(piece *Piece) {
 
 func (t *Torrent) complete() {
 	t.coalesced = true
-	t.done.Deliver(nil, nil)
+	t.err.Deliver(nil)
 }
 
 type Piece struct {
@@ -79,7 +81,7 @@ type Piece struct {
 	coalesced      bool
 	completeBlocks int
 	blocks         []*block
-	done           *future.Future[any]
+	err            *future.Future[error]
 }
 
 func newPiece(info *metainfo.Info, index int) *Piece {
@@ -92,7 +94,7 @@ func newPiece(info *metainfo.Info, index int) *Piece {
 		SHA1:      info.Pieces[index],
 		Index:     index,
 		numBlocks: numBlocks,
-		done:      future.New[any](),
+		err:       future.New[error](),
 	}
 }
 
@@ -102,17 +104,16 @@ func (p *Piece) FileName() string {
 
 func (p *Piece) Wait() error {
 	p.mu.RLock()
-	f := p.done
+	fut := p.err
 	p.mu.RUnlock()
-	_, err := f.Wait()
-	return err
+	return fut.Wait()
 }
 
 func (p *Piece) Reset() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.done.Deliver(nil, errors.New("storage: piece reset"))
-	p.done = future.New[any]()
+	p.err.Deliver(errors.New("storage: piece reset"))
+	p.err = future.New[error]()
 	p.blocks = nil
 	p.completeBlocks = 0
 }
