@@ -12,14 +12,25 @@ import (
 
 type Torrent struct {
 	Info *metainfo.Info
-	Done chan struct{}
+	done *future
 
 	mu             sync.RWMutex
 	bitfield       bitfield.Bitfield
 	coalesced      bool
 	completePieces int
 	pieces         []*Piece
-	err            error
+}
+
+func newTorrent(info *metainfo.Info) *Torrent {
+	torrent := &Torrent{
+		Info:   info,
+		done:   newFuture(),
+		pieces: make([]*Piece, len(info.Pieces)),
+	}
+	for i := range len(info.Pieces) {
+		torrent.pieces[i] = newPiece(info, i)
+	}
+	return torrent
 }
 
 func (t *Torrent) WorkDir() string {
@@ -40,10 +51,22 @@ func (t *Torrent) GetPiece(index int) *Piece {
 	return t.pieces[index]
 }
 
-func (t *Torrent) Err() error {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.err
+func (t *Torrent) Wait() error {
+	_, err := t.done.wait()
+	return err
+}
+
+func (t *Torrent) completePiece(piece *Piece) {
+	piece.coalesced = true
+	piece.done.finalize(nil, nil)
+	piece.blocks = nil
+	t.bitfield.Add(piece.Index)
+	t.completePieces++
+}
+
+func (t *Torrent) complete() {
+	t.coalesced = true
+	t.done.finalize(nil, nil)
 }
 
 type Piece struct {
@@ -52,45 +75,10 @@ type Piece struct {
 	numBlocks int
 
 	mu             sync.RWMutex
-	Done           chan struct{}
 	coalesced      bool
 	completeBlocks int
 	blocks         []*block
-	err            error
-}
-
-func (p *Piece) FileName() string {
-	return fmt.Sprintf("%d.piece", p.Index)
-}
-
-func (p *Piece) Err() error {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.err
-}
-
-func (p *Piece) Reset() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.reset()
-}
-
-type block struct {
-	index int
-	begin int
-	data  []byte
-}
-
-func newTorrent(info *metainfo.Info) *Torrent {
-	torrent := &Torrent{
-		Info:   info,
-		Done:   make(chan struct{}),
-		pieces: make([]*Piece, len(info.Pieces)),
-	}
-	for i := range len(info.Pieces) {
-		torrent.pieces[i] = newPiece(info, i)
-	}
-	return torrent
+	done           *future
 }
 
 func newPiece(info *metainfo.Info, index int) *Piece {
@@ -102,22 +90,30 @@ func newPiece(info *metainfo.Info, index int) *Piece {
 	return &Piece{
 		SHA1:      info.Pieces[index],
 		Index:     index,
-		Done:      make(chan struct{}),
 		numBlocks: numBlocks,
+		done:      newFuture(),
 	}
 }
 
-func (t *Torrent) completePiece(piece *Piece) {
-	piece.coalesced = true
-	close(piece.Done)
-	piece.blocks = nil
-	t.bitfield.Add(piece.Index)
-	t.completePieces++
+func (p *Piece) FileName() string {
+	return fmt.Sprintf("%d.piece", p.Index)
 }
 
-func (t *Torrent) complete() {
-	t.coalesced = true
-	close(t.Done)
+func (p *Piece) Wait() error {
+	p.mu.RLock()
+	f := p.done
+	p.mu.RUnlock()
+	_, err := f.wait()
+	return err
+}
+
+func (p *Piece) Reset() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.done.finalize(nil, errors.New("storage: piece reset"))
+	p.done = newFuture()
+	p.blocks = nil
+	p.completeBlocks = 0
 }
 
 func (p *Piece) putBlock(begin int, data []byte) error {
@@ -140,17 +136,28 @@ func (p *Piece) putBlock(begin int, data []byte) error {
 	return nil
 }
 
-func (p *Piece) fail(err error) {
-	p.err = err
-	close(p.Done)
+type block struct {
+	index int
+	begin int
+	data  []byte
 }
 
-func (p *Piece) reset() {
-	if !p.coalesced {
-		p.fail(errors.New("piece closed"))
-		p.Done = make(chan struct{})
-	}
-	p.err = nil
-	p.blocks = nil
-	p.completeBlocks = 0
+type future struct {
+	c   chan struct{}
+	res any
+	err error
+}
+
+func newFuture() *future {
+	return &future{c: make(chan struct{})}
+}
+
+func (p *future) finalize(res any, err error) {
+	p.res, p.err = res, err
+	close(p.c)
+}
+
+func (p *future) wait() (any, error) {
+	<-p.c
+	return p.res, p.err
 }

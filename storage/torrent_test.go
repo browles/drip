@@ -94,7 +94,7 @@ func Test_newPiece(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := newPiece(tt.info, tt.index)
-			got.Done = nil // cannot compare channels
+			got.done = nil // cannot compare channels
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Torrent.createPiece() = %+v, want %+v", got, tt.want)
 			}
