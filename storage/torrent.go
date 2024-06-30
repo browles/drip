@@ -3,7 +3,6 @@ package storage
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 
 	"github.com/browles/drip/api/metainfo"
@@ -12,10 +11,10 @@ import (
 )
 
 type Torrent struct {
-	Info *metainfo.Info
+	Info     *metainfo.Info
+	Bitfield bitfield.Bitfield
 
 	mu             sync.RWMutex
-	bitfield       bitfield.Bitfield
 	coalesced      bool
 	completePieces int
 	pieces         []*Piece
@@ -42,12 +41,6 @@ func (t *Torrent) FileName() string {
 	return t.Info.Name
 }
 
-func (t *Torrent) Bitfield() bitfield.Bitfield {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return slices.Clone(t.bitfield)
-}
-
 func (t *Torrent) GetPiece(index int) *Piece {
 	return t.pieces[index]
 }
@@ -63,7 +56,7 @@ func (t *Torrent) completePiece(piece *Piece) {
 	piece.coalesced = true
 	piece.err.Deliver(nil)
 	piece.blocks = nil
-	t.bitfield.Add(piece.Index)
+	t.Bitfield.Add(piece.Index)
 	t.completePieces++
 }
 

@@ -41,7 +41,7 @@ func (s *Storage) Load() error {
 		return err
 	}
 	if err == nil {
-		// Complete s.Torrent exists on disk
+		// Complete torrent exists on disk
 		for i := range len(s.Torrent.Info.Pieces) {
 			s.Torrent.completePiece(s.Torrent.pieces[i])
 		}
