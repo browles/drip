@@ -35,3 +35,14 @@ func (b *Bitfield) Items() []int {
 	}
 	return res
 }
+
+func (b *Bitfield) Difference(a Bitfield) Bitfield {
+	res := make(Bitfield, len(*b))
+	for i := range *b {
+		res[i] = (*b)[i]
+		if i < len(a) {
+			res[i] -= (*b)[i] & a[i]
+		}
+	}
+	return res
+}

@@ -68,7 +68,7 @@ func TestBitfield_Items(t *testing.T) {
 		want []int
 	}{
 		{
-			"all",
+			"items",
 			Bitfield{0b10101010, 0b11001100},
 			[]int{0, 2, 4, 6, 8, 9, 12, 13},
 		},
@@ -77,6 +77,27 @@ func TestBitfield_Items(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.b.Items(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Bitfield.Items() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBitfield_Difference(t *testing.T) {
+	tests := []struct {
+		name string
+		b    Bitfield
+		a    Bitfield
+		want Bitfield
+	}{
+		{"empty", Bitfield{}, Bitfield{0b01, 0x1}, Bitfield{}},
+		{"longer", Bitfield{0x00, 0xff}, Bitfield{0xff}, Bitfield{0x00, 0xff}},
+		{"shorter", Bitfield{0xff}, Bitfield{0x00, 0xff}, Bitfield{0xff}},
+		{"difference", Bitfield{0b11001100, 0b11110000, 0xff}, Bitfield{0b10101010, 0b01101101}, Bitfield{0b01000100, 0b10010000, 0xff}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.b.Difference(tt.a); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Bitfield.Difference() = %v, want %v", got, tt.want)
 			}
 		})
 	}
