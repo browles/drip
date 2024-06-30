@@ -71,10 +71,13 @@ func (p *Peer) Handshake(hs *peerapi.Handshake) error {
 func (p *Peer) Send(m *peerapi.Message) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	defer slog.Debug("Send", "peer", p.ID, "message", m)
 	if m.Type == peerapi.REQUEST {
+		if p.RemoteChoked {
+			return ErrChoked
+		}
 		p.SetReadDeadline(time.Now().Add(2 * time.Minute))
 	}
+	slog.Debug("Send", "peer", p.ID, "message", m)
 	return peerapi.Write(p.Conn, m)
 }
 
@@ -159,17 +162,20 @@ func (peer *Peer) HandleMessage(m *peerapi.Message) error {
 		peer.RemoteChoked = true
 	case peerapi.UNCHOKE:
 		peer.RemoteChoked = false
+		peer.server.queuePeer(peer)
 	case peerapi.INTERESTED:
 		peer.RemoteInterested = true
 	case peerapi.NOT_INTERESTED:
 		peer.RemoteInterested = false
 	case peerapi.HAVE:
 		peer.HandleHave(m.Index())
+		peer.server.queuePeer(peer)
 	case peerapi.BITFIELD:
 		bf := m.Bitfield()
 		for _, i := range bf.Items() {
 			peer.HandleHave(i)
 		}
+		peer.server.queuePeer(peer)
 	case peerapi.REQUEST:
 		return peer.HandleRequest(m.Index(), m.Begin(), m.Length())
 	case peerapi.CANCEL:
