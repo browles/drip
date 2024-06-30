@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	peerapi "github.com/browles/drip/api/peer"
@@ -17,12 +18,12 @@ import (
 
 type Peer struct {
 	ID               string
-	RemoteChoked     bool
-	RemoteInterested bool
-	Choked           bool
-	Interested       bool
+	RemoteChoked     atomic.Bool
+	RemoteInterested atomic.Bool
+	Closed           atomic.Bool
+	Choked           atomic.Bool
+	Interested       atomic.Bool
 	Bitfield         bitfield.Bitfield
-	Closed           bool
 
 	server *Server
 	cancel context.CancelFunc
@@ -36,15 +37,14 @@ type Peer struct {
 var ErrChoked = errors.New("p2p: peer connection is choked")
 
 func (p *Peer) Close() error {
-	if p.Closed {
-		return nil
+	if p.Closed.CompareAndSwap(false, true) {
+		if p.cancel == nil {
+			panic(errors.New("peer missing cancel"))
+		}
+		p.cancel()
+		return p.Conn.Close()
 	}
-	p.Closed = true
-	if p.cancel == nil {
-		panic(errors.New("peer missing cancel"))
-	}
-	p.cancel()
-	return p.Conn.Close()
+	return nil
 }
 
 func (p *Peer) Handshake(hs *peerapi.Handshake) error {
@@ -72,7 +72,7 @@ func (p *Peer) Send(m *peerapi.Message) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if m.Type == peerapi.REQUEST {
-		if p.RemoteChoked {
+		if p.RemoteChoked.Load() {
 			return ErrChoked
 		}
 		p.SetReadDeadline(time.Now().Add(2 * time.Minute))
@@ -110,23 +110,31 @@ func (p *Peer) Keepalive() error {
 }
 
 func (p *Peer) Choke() error {
-	p.Choked = true
-	return p.Send(peerapi.Choke())
+	if p.Choked.CompareAndSwap(false, true) {
+		return p.Send(peerapi.Choke())
+	}
+	return nil
 }
 
 func (p *Peer) Unchoke() error {
-	p.Choked = false
-	return p.Send(peerapi.Unchoke())
+	if p.Choked.CompareAndSwap(true, false) {
+		return p.Send(peerapi.Unchoke())
+	}
+	return nil
 }
 
 func (p *Peer) Interest() error {
-	p.Interested = true
-	return p.Send(peerapi.Interested())
+	if p.Interested.CompareAndSwap(false, true) {
+		return p.Send(peerapi.Interested())
+	}
+	return nil
 }
 
 func (p *Peer) NotInterest() error {
-	p.Interested = false
-	return p.Send(peerapi.NotInterested())
+	if p.Interested.CompareAndSwap(true, false) {
+		return p.Send(peerapi.NotInterested())
+	}
+	return nil
 }
 
 func (peer *Peer) serve(ctx context.Context) {
@@ -159,23 +167,23 @@ func (peer *Peer) HandleMessage(m *peerapi.Message) error {
 	switch m.Type {
 	case peerapi.KEEPALIVE:
 	case peerapi.CHOKE:
-		peer.RemoteChoked = true
+		peer.RemoteChoked.Store(true)
 	case peerapi.UNCHOKE:
-		peer.RemoteChoked = false
-		peer.server.queuePeer(peer)
+		peer.RemoteChoked.Store(false)
+		peer.server.QueuePeer(peer)
 	case peerapi.INTERESTED:
-		peer.RemoteInterested = true
+		peer.RemoteInterested.Store(true)
 	case peerapi.NOT_INTERESTED:
-		peer.RemoteInterested = false
+		peer.RemoteInterested.Store(false)
 	case peerapi.HAVE:
-		peer.HandleHave(m.Index())
-		peer.server.queuePeer(peer)
+		return peer.HandleHave(m.Index())
 	case peerapi.BITFIELD:
 		bf := m.Bitfield()
 		for _, i := range bf.Items() {
-			peer.HandleHave(i)
+			if err := peer.HandleHave(i); err != nil {
+				return err
+			}
 		}
-		peer.server.queuePeer(peer)
 	case peerapi.REQUEST:
 		return peer.HandleRequest(m.Index(), m.Begin(), m.Length())
 	case peerapi.CANCEL:
@@ -186,20 +194,18 @@ func (peer *Peer) HandleMessage(m *peerapi.Message) error {
 	return nil
 }
 
-func (peer *Peer) HandleHave(i int) {
-	peer.server.mu.Lock()
-	defer peer.server.mu.Unlock()
+func (peer *Peer) HandleHave(i int) error {
 	peer.Bitfield.Add(i)
-	m, ok := peer.server.indexToPeers[i]
-	if !ok {
-		m = make(map[*Peer]struct{})
-		peer.server.indexToPeers[i] = m
+	peer.server.RecordIndex(i, peer)
+	if !peer.server.Storage.Torrent.Bitfield.Has(i) {
+		peer.server.QueuePeer(peer)
+		return peer.Interest()
 	}
-	m[peer] = struct{}{}
+	return nil
 }
 
 func (peer *Peer) HandleRequest(index, begin, length int) error {
-	if peer.Choked {
+	if peer.Choked.Load() {
 		return ErrChoked
 	}
 	req := blockRequest{index, begin, length}
@@ -237,13 +243,7 @@ func (peer *Peer) HandlePiece(index, begin int, data []byte) error {
 }
 
 func (peer *Peer) requestPiece(ctx context.Context, index int) (err error) {
-	start := time.Now()
 	slog.Debug("requestPiece", "peer", peer.ID, "index", index)
-	defer func() {
-		if err == nil {
-			slog.Debug("requestPiece.time", "peer", peer.ID, "index", index, "time", time.Since(start))
-		}
-	}()
 	pieceLength := peer.server.Info.GetPieceLength(index)
 	piece := peer.server.Storage.GetPiece(index)
 	piece.Reset()
@@ -266,16 +266,10 @@ func (peer *Peer) requestPiece(ctx context.Context, index int) (err error) {
 }
 
 func (p *Peer) requestBlock(ctx context.Context, br *blockRequest) (err error) {
-	if p.RemoteChoked {
+	if p.RemoteChoked.Load() {
 		return ErrChoked
 	}
-	start := time.Now()
 	slog.Debug("requestBlock", "index", br.index, "begin", br.begin, "length", br.length)
-	defer func() {
-		if err == nil {
-			slog.Debug("requestBlock.time", "index", br.index, "begin", br.begin, "length", br.length, "time", time.Since(start))
-		}
-	}()
 	p.mu.Lock()
 	fut, ok := p.inflightRequests[*br]
 	if !ok {
