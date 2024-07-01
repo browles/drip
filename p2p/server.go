@@ -63,7 +63,7 @@ func New(info *metainfo.Info, peerID [20]byte, storage *storage.Storage, port in
 	}
 }
 
-func (p2p *Server) ListenAndServe() error {
+func (p2p *Server) Start() error {
 	err := p2p.Storage.Load()
 	if err != nil {
 		return err
@@ -72,7 +72,7 @@ func (p2p *Server) ListenAndServe() error {
 	if err != nil {
 		return err
 	}
-	slog.Info("ListenAndServe", "network", "tcp", "port", p2p.Port)
+	slog.Info("Start", "network", "tcp", "port", p2p.Port)
 	ctx, cancel := context.WithCancel(context.Background())
 	p2p.cancel = cancel
 	defer cancel()
@@ -90,7 +90,7 @@ func (p2p *Server) ListenAndServe() error {
 	return eg.Wait()
 }
 
-func (p2p *Server) Close() error {
+func (p2p *Server) Stop() error {
 	p2p.mu.Lock()
 	defer p2p.mu.Unlock()
 	if p2p.cancel == nil {
@@ -105,7 +105,7 @@ func (p2p *Server) Close() error {
 }
 
 func (p2p *Server) Serve(ctx context.Context) error {
-	defer p2p.Close()
+	defer p2p.Stop()
 	for {
 		select {
 		case <-ctx.Done():
