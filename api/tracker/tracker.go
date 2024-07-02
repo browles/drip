@@ -14,7 +14,7 @@ import (
 type Request struct {
 	Announce   string
 	InfoHash   [20]byte
-	PeerID     string
+	PeerID     [20]byte
 	IP         string
 	Port       int
 	Uploaded   int64
@@ -37,7 +37,7 @@ func (r *Request) URL() *url.URL {
 	for k, v := range map[string]string{
 		// http://bittorrent.org/beps/bep_0003.html
 		"info_hash":  string(r.InfoHash[:]),
-		"peer_id":    r.PeerID,
+		"peer_id":    string(r.PeerID[:]),
 		"ip":         r.IP,
 		"port":       strconv.Itoa(r.Port),
 		"uploaded":   strconv.FormatInt(r.Uploaded, 10),

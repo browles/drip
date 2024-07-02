@@ -7,6 +7,12 @@ import (
 	"testing"
 )
 
+func byte20(str string) [20]byte {
+	var res [20]byte
+	copy(res[:], str)
+	return res
+}
+
 func TestRequest_URL(t *testing.T) {
 	tests := []struct {
 		name string
@@ -18,7 +24,7 @@ func TestRequest_URL(t *testing.T) {
 			&Request{
 				Announce:   "http://example.com",
 				InfoHash:   [20]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
-				PeerID:     "-peer-id-",
+				PeerID:     byte20("-peer-id-11111111111"),
 				IP:         "1.2.3.4",
 				Port:       6888,
 				Uploaded:   1,
@@ -34,7 +40,7 @@ func TestRequest_URL(t *testing.T) {
 				url.QueryEscape(string([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9})),
 				url.QueryEscape("1.2.3.4"),
 				url.QueryEscape("3"),
-				url.QueryEscape("-peer-id-"),
+				url.QueryEscape("-peer-id-11111111111"),
 				url.QueryEscape("6888"),
 				url.QueryEscape("1"),
 			),
