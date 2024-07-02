@@ -68,6 +68,7 @@ func (t *Torrent) complete() {
 type Piece struct {
 	SHA1      [20]byte
 	Index     int
+	Length    int
 	numBlocks int
 
 	mu             sync.RWMutex
@@ -86,6 +87,7 @@ func newPiece(info *metainfo.Info, index int) *Piece {
 	return &Piece{
 		SHA1:      info.Pieces[index],
 		Index:     index,
+		Length:    pieceLength,
 		numBlocks: numBlocks,
 		err:       future.New[error](),
 	}

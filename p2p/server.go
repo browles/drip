@@ -27,10 +27,11 @@ type Server struct {
 	Storage *storage.Storage
 	Port    int
 
-	peerQueue chan *Peer
-	tcp       net.Listener
-	cancel    context.CancelFunc
-	uploaded  atomic.Int64
+	peerQueue  chan *Peer
+	tcp        net.Listener
+	cancel     context.CancelFunc
+	uploaded   atomic.Int64
+	downloaded atomic.Int64
 
 	mu           sync.Mutex
 	knownPeers   map[string]*tracker.Peer

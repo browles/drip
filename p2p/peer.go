@@ -251,6 +251,7 @@ func (peer *Peer) HandlePiece(index, begin int, data []byte) error {
 	}
 	if err == nil {
 		peer.downloaded.Add(int64(len(data)))
+		peer.server.downloaded.Add(int64(len(data)))
 	}
 	return nil
 }
@@ -258,8 +259,7 @@ func (peer *Peer) HandlePiece(index, begin int, data []byte) error {
 func (peer *Peer) requestPiece(ctx context.Context, index int) (err error) {
 	slog.Debug("requestPiece", "peer", peer.ID, "index", index)
 	pieceLength := peer.server.Info.GetPieceLength(index)
-	n, piece := peer.server.Storage.ResetPiece(index)
-	peer.downloaded.Add(-n)
+	piece := peer.server.Storage.ResetPiece(index)
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(16)
 	for begin := 0; begin < pieceLength; begin += storage.BLOCK_LENGTH {

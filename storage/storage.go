@@ -85,17 +85,12 @@ func (s *Storage) GetPiece(index int) *Piece {
 	return s.Torrent.pieces[index]
 }
 
-func (s *Storage) ResetPiece(index int) (int64, *Piece) {
+func (s *Storage) ResetPiece(index int) *Piece {
 	piece := s.Torrent.pieces[index]
 	piece.mu.Lock()
 	defer piece.mu.Unlock()
-	deleted := int64(0)
-	for _, b := range piece.blocks {
-		deleted += int64(len(b.data))
-	}
-	s.downloaded.Add(-deleted)
 	piece.reset()
-	return deleted, piece
+	return piece
 }
 
 func (s *Storage) GetBlock(index, begin, length int) ([]byte, error) {
@@ -133,8 +128,8 @@ func (s *Storage) PutBlock(index, begin int, data []byte) error {
 	}
 	s.Torrent.mu.Lock()
 	defer s.Torrent.mu.Unlock()
-	s.downloaded.Add(int64(len(data)))
 	if err := s.coalesceBlocks(piece); err != nil {
+		s.downloaded.Add(int64(piece.Length))
 		piece.err.Deliver(err)
 		return err
 	}
