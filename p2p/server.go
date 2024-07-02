@@ -10,6 +10,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/browles/drip/api/metainfo"
@@ -29,6 +30,7 @@ type Server struct {
 	peerQueue chan *Peer
 	tcp       net.Listener
 	cancel    context.CancelFunc
+	uploaded  atomic.Int64
 
 	mu           sync.Mutex
 	knownPeers   map[string]*tracker.Peer
@@ -37,12 +39,6 @@ type Server struct {
 	indexToPeers map[int]map[*Peer]struct{}
 	queuedPeers  map[*Peer]struct{}
 	inflight     map[int]*Peer
-}
-
-type blockRequest struct {
-	index  int
-	begin  int
-	length int
 }
 
 func New(info *metainfo.Info, peerID [20]byte, storage *storage.Storage, port int) *Server {

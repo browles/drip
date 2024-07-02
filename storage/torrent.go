@@ -24,8 +24,8 @@ type Torrent struct {
 func newTorrent(info *metainfo.Info) *Torrent {
 	torrent := &Torrent{
 		Info:   info,
-		err:    future.New[error](),
 		pieces: make([]*Piece, len(info.Pieces)),
+		err:    future.New[error](),
 	}
 	for i := range len(info.Pieces) {
 		torrent.pieces[i] = newPiece(info, i)
@@ -102,9 +102,7 @@ func (p *Piece) Wait() error {
 	return fut.Wait()
 }
 
-func (p *Piece) Reset() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+func (p *Piece) reset() {
 	p.err.Deliver(errors.New("storage: piece reset"))
 	p.err = future.New[error]()
 	p.blocks = nil

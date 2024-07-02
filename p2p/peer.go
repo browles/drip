@@ -25,13 +25,21 @@ type Peer struct {
 	Interested       atomic.Bool
 	Bitfield         bitfield.Bitfield
 
-	server *Server
-	cancel context.CancelFunc
+	server     *Server
+	cancel     context.CancelFunc
+	downloaded atomic.Int64
+	uploaded   atomic.Int64
 
 	mu sync.Mutex
 	net.Conn
 	inflightRequests map[blockRequest]*future.Future[error]
 	canceledRequests map[blockRequest]struct{}
+}
+
+type blockRequest struct {
+	index  int
+	begin  int
+	length int
 }
 
 var ErrChoked = errors.New("p2p: peer connection is choked")
@@ -224,6 +232,8 @@ func (peer *Peer) HandleRequest(index, begin, length int) error {
 	if err != nil {
 		return err
 	}
+	peer.uploaded.Add(int64(len(data)))
+	peer.server.uploaded.Add(int64(len(data)))
 	return nil
 }
 
@@ -239,14 +249,17 @@ func (peer *Peer) HandlePiece(index, begin int, data []byte) error {
 	if err != nil && !errors.Is(err, storage.ErrBlockExists) {
 		return err
 	}
+	if err == nil {
+		peer.downloaded.Add(int64(len(data)))
+	}
 	return nil
 }
 
 func (peer *Peer) requestPiece(ctx context.Context, index int) (err error) {
 	slog.Debug("requestPiece", "peer", peer.ID, "index", index)
 	pieceLength := peer.server.Info.GetPieceLength(index)
-	piece := peer.server.Storage.GetPiece(index)
-	piece.Reset()
+	n, piece := peer.server.Storage.ResetPiece(index)
+	peer.downloaded.Add(-n)
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(16)
 	for begin := 0; begin < pieceLength; begin += storage.BLOCK_LENGTH {
@@ -262,7 +275,10 @@ func (peer *Peer) requestPiece(ctx context.Context, index int) (err error) {
 	if err := eg.Wait(); err != nil {
 		return err
 	}
-	return piece.Wait()
+	if err := piece.Wait(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (p *Peer) requestBlock(ctx context.Context, br *blockRequest) (err error) {

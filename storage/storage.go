@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/browles/drip/api/metainfo"
 )
@@ -16,9 +17,10 @@ import (
 const BLOCK_LENGTH = 1 << 14
 
 type Storage struct {
-	TargetDir string
-	WorkDir   string
-	Torrent   *Torrent
+	TargetDir  string
+	WorkDir    string
+	Torrent    *Torrent
+	downloaded atomic.Int64
 }
 
 var (
@@ -36,7 +38,7 @@ func New(targetDir, workDir string, info *metainfo.Info) *Storage {
 }
 
 func (s *Storage) Load() error {
-	_, err := os.Stat(filepath.Join(s.TargetDir, s.Torrent.FileName()))
+	st, err := os.Stat(filepath.Join(s.TargetDir, s.Torrent.FileName()))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -46,6 +48,7 @@ func (s *Storage) Load() error {
 			s.Torrent.completePiece(s.Torrent.pieces[i])
 		}
 		s.Torrent.complete()
+		s.downloaded.Add(st.Size())
 	} else {
 		// Check for complete pieces on disk
 		direntries, err := os.ReadDir(filepath.Join(s.WorkDir, s.Torrent.WorkDir()))
@@ -59,6 +62,11 @@ func (s *Storage) Load() error {
 				if err != nil {
 					continue
 				}
+				st, err := os.Stat(dr.Name())
+				if err != nil {
+					return err
+				}
+				s.downloaded.Add(st.Size())
 				s.Torrent.completePiece(s.Torrent.pieces[i])
 			}
 			if err = s.coalescePieces(); err != nil {
@@ -69,8 +77,25 @@ func (s *Storage) Load() error {
 	return nil
 }
 
+func (s *Storage) Downloaded() int64 {
+	return s.downloaded.Load()
+}
+
 func (s *Storage) GetPiece(index int) *Piece {
 	return s.Torrent.pieces[index]
+}
+
+func (s *Storage) ResetPiece(index int) (int64, *Piece) {
+	piece := s.Torrent.pieces[index]
+	piece.mu.Lock()
+	defer piece.mu.Unlock()
+	deleted := int64(0)
+	for _, b := range piece.blocks {
+		deleted += int64(len(b.data))
+	}
+	s.downloaded.Add(-deleted)
+	piece.reset()
+	return deleted, piece
 }
 
 func (s *Storage) GetBlock(index, begin, length int) ([]byte, error) {
@@ -108,6 +133,7 @@ func (s *Storage) PutBlock(index, begin int, data []byte) error {
 	}
 	s.Torrent.mu.Lock()
 	defer s.Torrent.mu.Unlock()
+	s.downloaded.Add(int64(len(data)))
 	if err := s.coalesceBlocks(piece); err != nil {
 		piece.err.Deliver(err)
 		return err
