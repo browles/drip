@@ -13,7 +13,7 @@ func byte20(str string) [20]byte {
 	return res
 }
 
-func TestRequest_URL(t *testing.T) {
+func TestRequest_Encode(t *testing.T) {
 	tests := []struct {
 		name string
 		r    *Request
@@ -22,7 +22,6 @@ func TestRequest_URL(t *testing.T) {
 		{
 			"tracker",
 			&Request{
-				Announce:   "http://example.com",
 				InfoHash:   [20]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
 				PeerID:     byte20("-peer-id-11111111111"),
 				IP:         "1.2.3.4",
@@ -33,7 +32,7 @@ func TestRequest_URL(t *testing.T) {
 				Event:      "started",
 				Compact:    true,
 			},
-			fmt.Sprintf("http://example.com?compact=%s&downloaded=%s&event=%s&info_hash=%s&ip=%s&left=%s&peer_id=%s&port=%s&uploaded=%s",
+			fmt.Sprintf("compact=%s&downloaded=%s&event=%s&info_hash=%s&ip=%s&left=%s&peer_id=%s&port=%s&uploaded=%s",
 				url.QueryEscape("1"),
 				url.QueryEscape("2"),
 				url.QueryEscape("started"),
@@ -48,8 +47,8 @@ func TestRequest_URL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.r.URL().String(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Request.URL() = %v, want %v", got, tt.want)
+			if got := tt.r.Encode(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Request.Encode() = %v, want %v", got, tt.want)
 			}
 		})
 	}

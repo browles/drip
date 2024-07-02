@@ -12,7 +12,6 @@ import (
 )
 
 type Request struct {
-	Announce   string
 	InfoHash   [20]byte
 	PeerID     [20]byte
 	IP         string
@@ -32,7 +31,7 @@ func ifelse[T any](t bool, a, b T) T {
 	return b
 }
 
-func (r *Request) URL() *url.URL {
+func (r *Request) Encode() string {
 	params := make(url.Values)
 	for k, v := range map[string]string{
 		// http://bittorrent.org/beps/bep_0003.html
@@ -56,12 +55,7 @@ func (r *Request) URL() *url.URL {
 			params.Set(k, v)
 		}
 	}
-	url, err := url.Parse(r.Announce)
-	if err != nil {
-		return nil
-	}
-	url.RawQuery = params.Encode()
-	return url
+	return params.Encode()
 }
 
 type Response struct {
