@@ -8,6 +8,7 @@ import (
 	"github.com/browles/drip/p2p"
 )
 
+// https://www.bittorrent.org/beps/bep_0012.html
 type Multitracker struct {
 	TrackerTiers [][]*Tracker
 	server       *p2p.Server
@@ -27,7 +28,7 @@ func New(mi *metainfo.Metainfo, s *p2p.Server) *Multitracker {
 		})
 		var tier []*Tracker
 		for _, url := range list {
-			tier = append(tier, &Tracker{AnnounceURL: url, server: s})
+			tier = append(tier, &Tracker{URL: url, server: s})
 		}
 		mt.TrackerTiers = append(mt.TrackerTiers, tier)
 	}
