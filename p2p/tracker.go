@@ -1,4 +1,4 @@
-package tracker
+package p2p
 
 import (
 	"errors"
@@ -8,12 +8,11 @@ import (
 
 	trackerapi "github.com/browles/drip/api/tracker"
 	"github.com/browles/drip/bencode"
-	"github.com/browles/drip/p2p"
 )
 
 type Tracker struct {
 	URL    string
-	server *p2p.Server
+	server *Server
 }
 
 type eventName string

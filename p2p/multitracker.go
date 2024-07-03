@@ -1,33 +1,34 @@
-package tracker
+package p2p
 
 import (
+	"log/slog"
 	"math/rand"
+	"slices"
 
 	"github.com/browles/drip/api/metainfo"
 	trackerapi "github.com/browles/drip/api/tracker"
-	"github.com/browles/drip/p2p"
 )
 
 // https://www.bittorrent.org/beps/bep_0012.html
 type Multitracker struct {
 	TrackerTiers [][]*Tracker
-	server       *p2p.Server
 }
 
-func New(mi *metainfo.Metainfo, s *p2p.Server) *Multitracker {
+func NewMultitracker(mi *metainfo.Metainfo, s *Server) *Multitracker {
 	var announceList [][]string
 	if len(mi.AnnounceList) > 0 {
 		announceList = mi.AnnounceList
 	} else {
 		announceList = [][]string{{mi.Announce}}
 	}
-	mt := &Multitracker{server: s}
+	mt := &Multitracker{}
 	for _, list := range announceList {
-		rand.Shuffle(len(list), func(i, j int) {
-			list[i], list[j] = list[j], list[i]
+		cpy := slices.Clone(list)
+		rand.Shuffle(len(cpy), func(i, j int) {
+			cpy[i], cpy[j] = cpy[j], cpy[i]
 		})
 		var tier []*Tracker
-		for _, url := range list {
+		for _, url := range cpy {
 			tier = append(tier, &Tracker{URL: url, server: s})
 		}
 		mt.TrackerTiers = append(mt.TrackerTiers, tier)
@@ -60,6 +61,7 @@ func (mt *Multitracker) get(event eventName) (res *trackerapi.Response, err erro
 				trackers[0] = tracker
 				return
 			}
+			slog.Error("get", "err", err)
 		}
 	}
 	return
