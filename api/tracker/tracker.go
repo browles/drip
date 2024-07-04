@@ -58,6 +58,52 @@ func (r *Request) Encode() string {
 	return params.Encode()
 }
 
+func (r *Request) Decode(rawQuery string) error {
+	params, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return err
+	}
+	for _, f := range []struct {
+		key  string
+		dest any
+	}{
+		{"info_hash", &r.InfoHash},
+		{"peer_id", &r.PeerID},
+		{"ip", &r.IP},
+		{"port", &r.Port},
+		{"uploaded", &r.Uploaded},
+		{"downloaded", &r.Downloaded},
+		{"left", &r.Left},
+		{"event", &r.Event},
+		{"compact", &r.Compact},
+	} {
+		v := params.Get(f.key)
+		if v == "" {
+			continue
+		}
+		switch dest := f.dest.(type) {
+		case *[20]byte:
+			copy((*dest)[:], v)
+		case *string:
+			*dest = v
+		case *int, *int64:
+			i, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return err
+			}
+			switch dest := dest.(type) {
+			case *int:
+				*dest = int(i)
+			case *int64:
+				*dest = i
+			}
+		case *bool:
+			*dest = v == "1"
+		}
+	}
+	return nil
+}
+
 type Response struct {
 	// http://bittorrent.org/beps/bep_0003.html
 	FailureReason string `bencode:"failure reason,omitempty"`

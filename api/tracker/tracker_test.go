@@ -3,8 +3,9 @@ package tracker
 import (
 	"fmt"
 	"net/url"
-	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func byte20(str string) [20]byte {
@@ -47,8 +48,57 @@ func TestRequest_Encode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.r.Encode(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Request.Encode() = %v, want %v", got, tt.want)
+			got := tt.r.Encode()
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("Request.Encode() -want, +got\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestRequest_Decode(t *testing.T) {
+	tests := []struct {
+		name     string
+		rawQuery string
+		want     *Request
+		wantErr  bool
+	}{
+		{
+			"tracker",
+			fmt.Sprintf("compact=%s&downloaded=%s&event=%s&info_hash=%s&ip=%s&left=%s&peer_id=%s&port=%s&uploaded=%s",
+				url.QueryEscape("1"),
+				url.QueryEscape("2"),
+				url.QueryEscape("started"),
+				url.QueryEscape(string([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9})),
+				url.QueryEscape("1.2.3.4"),
+				url.QueryEscape("3"),
+				url.QueryEscape("-peer-id-11111111111"),
+				url.QueryEscape("6888"),
+				url.QueryEscape("1"),
+			),
+			&Request{
+				InfoHash:   [20]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+				PeerID:     byte20("-peer-id-11111111111"),
+				IP:         "1.2.3.4",
+				Port:       6888,
+				Uploaded:   1,
+				Downloaded: 2,
+				Left:       3,
+				Event:      "started",
+				Compact:    true,
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := &Request{}
+			err := got.Decode(tt.rawQuery)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Request.Decode() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("Request.Decode() -want, +got\n%s", diff)
 			}
 		})
 	}
@@ -58,7 +108,7 @@ func TestPeers_MarshalBencoding(t *testing.T) {
 	tests := []struct {
 		name    string
 		p       *Peers
-		want    string
+		want    []byte
 		wantErr bool
 	}{
 		{
@@ -78,7 +128,7 @@ func TestPeers_MarshalBencoding(t *testing.T) {
 					},
 				},
 			},
-			"12:" + string([]byte{1, 2, 3, 4, 0x16, 0x2e, 2, 3, 4, 1, 0x1a, 0x81}),
+			[]byte("12:" + string([]byte{1, 2, 3, 4, 0x16, 0x2e, 2, 3, 4, 1, 0x1a, 0x81})),
 			false,
 		},
 		{
@@ -98,7 +148,7 @@ func TestPeers_MarshalBencoding(t *testing.T) {
 					},
 				},
 			},
-			"ld2:ip7:1.2.3.47:peer id3:abc4:porti5678eed2:ip7:2.3.4.17:peer id3:def4:porti6785eee",
+			[]byte("ld2:ip7:1.2.3.47:peer id3:abc4:porti5678eed2:ip7:2.3.4.17:peer id3:def4:porti6785eee"),
 			false,
 		},
 	}
@@ -109,8 +159,8 @@ func TestPeers_MarshalBencoding(t *testing.T) {
 				t.Errorf("Peers.MarshalBencoding() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(string(got), tt.want) {
-				t.Errorf("Peers.MarshalBencoding() = %v, want %v", string(got), tt.want)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("Peers.MarshalBencoding() -want, +got\n%s", diff)
 			}
 		})
 	}
@@ -164,14 +214,14 @@ func TestPeers_UnmarshalBencoding(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &Peers{}
-			err := p.UnmarshalBencoding([]byte(tt.data))
+			got := &Peers{}
+			err := got.UnmarshalBencoding([]byte(tt.data))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Peers.UnmarshalBencoding() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(p, tt.want) {
-				t.Errorf("Peers.UnmarshalBencoding() = %+v, want %+v", p, tt.want)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("Peers.UnmarshalBencoding() -want, +got\n%s", diff)
 			}
 		})
 	}
