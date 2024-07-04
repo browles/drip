@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"sync"
@@ -29,6 +30,7 @@ type Torrent struct {
 type Peer struct {
 	tp        *trackerapi.Peer
 	UpdatedAt time.Time
+	LastEvent string
 }
 
 func NewHTTP(infos []*metainfo.Info, port int) *HTTP {
@@ -42,6 +44,23 @@ func NewHTTP(infos []*metainfo.Info, port int) *HTTP {
 			Peers: make(map[string]*Peer),
 		}
 	}
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			<-ticker.C
+			for _, torrent := range t.Torrents {
+				torrent.mu.Lock()
+				peers := maps.Clone(torrent.Peers)
+				for addr, p := range peers {
+					if p.LastEvent == "stopped" || time.Since(p.UpdatedAt) > time.Minute {
+						delete(torrent.Peers, addr)
+					}
+				}
+				torrent.mu.Unlock()
+			}
+		}
+	}()
 	return t
 }
 
@@ -104,9 +123,10 @@ func (t *HTTP) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		torrent.Peers[addr] = peer
 	}
 	peer.UpdatedAt = time.Now()
+	peer.LastEvent = r.Event
 	peers := &trackerapi.Peers{Compact: r.Compact}
 	for _, p := range torrent.Peers {
-		if time.Since(p.UpdatedAt) > time.Minute {
+		if p.LastEvent == "stopped" || time.Since(p.UpdatedAt) > time.Minute {
 			continue
 		}
 		paddr := fmt.Sprintf("%s:%d", p.tp.IP, p.tp.Port)
