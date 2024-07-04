@@ -39,6 +39,7 @@ func Test_newPiece(t *testing.T) {
 			&Piece{
 				SHA1:      [20]byte{1: 1},
 				Index:     0,
+				Length:    8 * BLOCK_LENGTH,
 				numBlocks: 8,
 			},
 		},
@@ -47,6 +48,7 @@ func Test_newPiece(t *testing.T) {
 			&Piece{
 				SHA1:      [20]byte{4: 4},
 				Index:     3,
+				Length:    8 * BLOCK_LENGTH,
 				numBlocks: 8,
 			},
 		},
@@ -55,6 +57,7 @@ func Test_newPiece(t *testing.T) {
 			&Piece{
 				SHA1:      [20]byte{1: 1},
 				Index:     0,
+				Length:    8 * BLOCK_LENGTH,
 				numBlocks: 8,
 			},
 		},
@@ -63,6 +66,7 @@ func Test_newPiece(t *testing.T) {
 			&Piece{
 				SHA1:      [20]byte{4: 4},
 				Index:     3,
+				Length:    8*BLOCK_LENGTH - 1000,
 				numBlocks: 8,
 			},
 		},
@@ -71,6 +75,7 @@ func Test_newPiece(t *testing.T) {
 			&Piece{
 				SHA1:      [20]byte{1: 1},
 				Index:     0,
+				Length:    8 * BLOCK_LENGTH,
 				numBlocks: 8,
 			},
 		},
@@ -79,6 +84,7 @@ func Test_newPiece(t *testing.T) {
 			&Piece{
 				SHA1:      [20]byte{1: 1},
 				Index:     0,
+				Length:    3 * BLOCK_LENGTH / 2,
 				numBlocks: 2,
 			},
 		},
@@ -87,6 +93,7 @@ func Test_newPiece(t *testing.T) {
 			&Piece{
 				SHA1:      [20]byte{4: 4},
 				Index:     3,
+				Length:    3 * BLOCK_LENGTH / 2,
 				numBlocks: 2,
 			},
 		},
@@ -96,7 +103,7 @@ func Test_newPiece(t *testing.T) {
 			got := newPiece(tt.info, tt.index)
 			got.err = nil // cannot compare channels
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Torrent.createPiece() = %+v, want %+v", got, tt.want)
+				t.Errorf("Torrent.createPiece() = %+v,\n want %+v", got, tt.want)
 			}
 		})
 	}
