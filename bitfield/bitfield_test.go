@@ -43,14 +43,14 @@ func TestBitfield_Add(t *testing.T) {
 		want Bitfield
 	}{
 		{
-			"set",
+			"add",
 			[]int{0, 2, 4, 6, 8, 9, 12, 13},
 			Bitfield{0b10101010, 0b11001100},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b := Bitfield{}
+			b := New(16)
 			for _, i := range tt.i {
 				b.Add(i)
 			}
