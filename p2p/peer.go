@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"sync"
@@ -47,7 +48,7 @@ var ErrChoked = errors.New("p2p: peer connection is choked")
 func (p *Peer) Close() error {
 	if p.Closed.CompareAndSwap(false, true) {
 		if p.cancel == nil {
-			panic(errors.New("peer missing cancel"))
+			panic("peer missing cancel")
 		}
 		p.cancel()
 		return p.Conn.Close()
@@ -81,6 +82,11 @@ func (p *Peer) Handshake() error {
 		return errors.New("p2p: Handshake: peer ID matches own ID")
 	}
 	return nil
+}
+
+func (p *Peer) IPID() IPID {
+	addr := p.RemoteAddr().(*net.TCPAddr)
+	return IPID(fmt.Sprintf("%s[%s]", string(p.ID[:]), addr.IP.String()))
 }
 
 func (p *Peer) Send(m *peerapi.Message) error {
@@ -153,15 +159,10 @@ func (p *Peer) NotInterest() error {
 }
 
 func (peer *Peer) serve(ctx context.Context) {
-	errorChan := make(chan error)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case err := <-errorChan:
-			if err != nil {
-				return
-			}
 		default:
 		}
 		m, err := peer.Receive()
