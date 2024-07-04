@@ -62,7 +62,7 @@ func (s *Storage) Load() error {
 				if err != nil {
 					continue
 				}
-				st, err := os.Stat(dr.Name())
+				st, err := os.Stat(filepath.Join(s.WorkDir, s.Torrent.WorkDir(), dr.Name()))
 				if err != nil {
 					return err
 				}
