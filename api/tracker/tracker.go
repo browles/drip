@@ -112,9 +112,9 @@ type Response struct {
 	// ?
 	WarningReason string `bencode:"warning reason,omitempty"`
 	MinInterval   int    `bencode:"min interval,omitempty"`
-	TrackerID     string `bencode:"tracker id"`
-	Complete      int    `bencode:"complete"`
-	Incomplete    int    `bencode:"incomplete"`
+	TrackerID     string `bencode:"tracker id,omitempty"`
+	Complete      int    `bencode:"complete,omitempty"`
+	Incomplete    int    `bencode:"incomplete,omitempty"`
 }
 
 type Peers struct {
