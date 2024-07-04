@@ -287,11 +287,7 @@ func (p2p *Server) Connect(peer *Peer) error {
 	}
 	p2p.mu.Unlock()
 	slog.Debug("Connect", "peer", peer.RemoteAddr().String())
-	hs := &peerapi.Handshake{
-		InfoHash: p2p.Info.SHA1,
-		PeerID:   p2p.PeerID,
-	}
-	if err := peer.Handshake(hs); err != nil {
+	if err := peer.Handshake(); err != nil {
 		return err
 	}
 	bf := p2p.Storage.Torrent.Bitfield

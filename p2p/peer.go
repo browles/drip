@@ -17,7 +17,7 @@ import (
 )
 
 type Peer struct {
-	ID               string
+	ID               [20]byte
 	RemoteChoked     atomic.Bool
 	RemoteInterested atomic.Bool
 	Closed           atomic.Bool
@@ -55,10 +55,14 @@ func (p *Peer) Close() error {
 	return nil
 }
 
-func (p *Peer) Handshake(hs *peerapi.Handshake) error {
+func (p *Peer) Handshake() error {
 	slog.Debug("Handshake", "peer", p.RemoteAddr())
 	p.SetDeadline(time.Now().Add(10 * time.Second))
 	defer p.SetDeadline(time.Time{})
+	hs := &peerapi.Handshake{
+		InfoHash: p.server.Info.SHA1,
+		PeerID:   p.server.PeerID,
+	}
 	if err := peerapi.Write(p.Conn, hs); err != nil {
 		return err
 	}
@@ -69,10 +73,13 @@ func (p *Peer) Handshake(hs *peerapi.Handshake) error {
 	if phs.InfoHash != hs.InfoHash {
 		return errors.New("p2p: Handshake: info hashes do not match")
 	}
-	if p.ID != "" && p.ID != string(phs.PeerID[:]) {
+	if p.ID != [20]byte{} && p.ID != phs.PeerID {
 		return errors.New("p2p: Handshake: peer IDs do not match")
 	}
-	p.ID = string(phs.PeerID[:])
+	p.ID = phs.PeerID
+	if p.ID == p.server.PeerID {
+		return errors.New("p2p: Handshake: peer ID matches own ID")
+	}
 	return nil
 }
 
