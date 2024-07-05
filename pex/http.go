@@ -16,7 +16,6 @@ import (
 )
 
 type HTTP struct {
-	Port     int
 	Torrents map[[20]byte]*Torrent
 }
 
@@ -33,9 +32,8 @@ type Peer struct {
 	LastEvent string
 }
 
-func NewHTTP(infos []*metainfo.Info, port int) *HTTP {
+func NewHTTP(infos []*metainfo.Info) *HTTP {
 	t := &HTTP{
-		Port:     port,
 		Torrents: make(map[[20]byte]*Torrent),
 	}
 	for _, i := range infos {

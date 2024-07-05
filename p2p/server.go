@@ -16,6 +16,7 @@ import (
 	"github.com/browles/drip/api/metainfo"
 	peerapi "github.com/browles/drip/api/peer"
 	"github.com/browles/drip/api/tracker"
+	"github.com/browles/drip/bitfield"
 	"github.com/browles/drip/future"
 	"github.com/browles/drip/storage"
 	"golang.org/x/sync/errgroup"
@@ -28,6 +29,7 @@ type Server struct {
 	Port    int
 	Tracker *Multitracker
 
+	peerSemaphore chan struct{}
 	newPeerQueue  chan *tracker.Peer
 	downloadQueue chan *Peer
 	tcp           net.Listener
@@ -36,15 +38,25 @@ type Server struct {
 	downloaded    atomic.Int64
 
 	mu           sync.Mutex
-	knownPeers   map[string]*tracker.Peer
-	blockedPeers map[string]struct{}
-	activePeers  map[IPID]*Peer
+	knownPeers   map[addr]*tracker.Peer
+	knownAddrs   map[idip]map[addr]struct{}
+	knownIDIPs   map[addr]idip
+	blockedPeers map[addr]struct{}
+	activePeers  map[idip]*Peer
 	indexToPeers map[int]map[*Peer]struct{}
 	queuedPeers  map[*Peer]struct{}
 	inflight     map[int]*Peer
 }
 
-type IPID string
+type (
+	addr string // ip:port
+	idip string // peer_id[ip]
+)
+
+var (
+	ErrTooManyConnections = errors.New("p2p: too many connections")
+	ErrAlreadyConnected   = errors.New("p2p: already connected")
+)
 
 func New(mi *metainfo.Metainfo, peerID [20]byte, storage *storage.Storage, port int) *Server {
 	s := &Server{
@@ -53,12 +65,15 @@ func New(mi *metainfo.Metainfo, peerID [20]byte, storage *storage.Storage, port 
 		Storage: storage,
 		Port:    port,
 
+		peerSemaphore: make(chan struct{}, 50),
 		newPeerQueue:  make(chan *tracker.Peer, 50),
 		downloadQueue: make(chan *Peer),
 
-		knownPeers:   make(map[string]*tracker.Peer),
-		blockedPeers: make(map[string]struct{}),
-		activePeers:  make(map[IPID]*Peer),
+		knownPeers:   make(map[addr]*tracker.Peer),
+		knownAddrs:   make(map[idip]map[addr]struct{}),
+		knownIDIPs:   make(map[addr]idip),
+		blockedPeers: make(map[addr]struct{}),
+		activePeers:  make(map[idip]*Peer),
 		indexToPeers: make(map[int]map[*Peer]struct{}),
 		queuedPeers:  make(map[*Peer]struct{}),
 		inflight:     make(map[int]*Peer),
@@ -110,7 +125,7 @@ func (p2p *Server) Stop() error {
 	p2p.mu.Lock()
 	defer p2p.mu.Unlock()
 	if p2p.cancel == nil {
-		return errors.New("p2p: server not started?")
+		return errors.New("p2p: server not started")
 	}
 	p2p.cancel()
 	p2p.tcp.Close()
@@ -134,17 +149,19 @@ func (p2p *Server) Serve(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		slog.Debug("Serve.Accept", "conn", conn.RemoteAddr())
+		select {
+		case p2p.peerSemaphore <- struct{}{}:
+		default:
+			conn.Close()
+			continue
+		}
 		go func() {
+			defer func() { <-p2p.peerSemaphore }()
+			slog.Debug("Serve.Accept", "conn", conn.RemoteAddr())
 			peer := p2p.newPeer(conn)
 			ctx, cancel := context.WithCancel(ctx)
 			peer.cancel = cancel
-			defer peer.Close()
-			if err := p2p.Connect(peer); err != nil {
-				slog.Error("Serve.Connect", "err", err)
-				return
-			}
-			slog.Info("Serve", "peer", peer.RemoteAddr().String())
+			slog.Info("Serve", "peer", peer.Addr())
 			peer.serve(ctx)
 		}()
 	}
@@ -156,9 +173,15 @@ func (p2p *Server) DialPeers(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case tp := <-p2p.newPeerQueue:
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case p2p.peerSemaphore <- struct{}{}:
+			}
 			go func() {
+				defer func() { <-p2p.peerSemaphore }()
 				if err := p2p.dialPeer(ctx, tp); err != nil {
-					slog.Error("DialPeers.DialPeer", "err", err)
+					slog.Error("DialPeers.dialPeer", "err", err)
 				}
 			}()
 		}
@@ -226,7 +249,7 @@ func (p2p *Server) QueuePeer(peer *Peer) bool {
 func (p2p *Server) AddPeer(tp *tracker.Peer) error {
 	p2p.mu.Lock()
 	defer p2p.mu.Unlock()
-	addr, err := addr(tp)
+	addr, err := remoteAddr(tp)
 	if err != nil {
 		return err
 	}
@@ -236,43 +259,66 @@ func (p2p *Server) AddPeer(tp *tracker.Peer) error {
 	if _, ok := p2p.blockedPeers[addr]; ok {
 		return nil
 	}
-	p2p.knownPeers[addr] = tp
-	p2p.newPeerQueue <- tp
+	select {
+	case p2p.newPeerQueue <- tp:
+		p2p.knownPeers[addr] = tp
+	default:
+	}
 	return nil
 }
 
 func (p2p *Server) Connect(peer *Peer) error {
 	p2p.mu.Lock()
-	if _, ok := p2p.activePeers[peer.IPID()]; ok {
-		return errors.New("p2p: already connected")
+	if len(p2p.activePeers) >= 50 {
+		return ErrTooManyConnections
+	}
+	if idip, ok := p2p.knownIDIPs[peer.Addr()]; ok {
+		if _, ok := p2p.activePeers[idip]; ok {
+			return ErrAlreadyConnected
+		}
 	}
 	p2p.mu.Unlock()
-	slog.Debug("Connect", "peer", peer.RemoteAddr().String())
+	slog.Debug("Connect", "peer", peer.Addr())
 	if err := peer.Handshake(); err != nil {
 		return err
 	}
+	p2p.mu.Lock()
+	defer p2p.mu.Unlock()
+	if len(p2p.activePeers) >= 50 {
+		return ErrTooManyConnections
+	}
+	addrs, ok := p2p.knownAddrs[peer.IDIP()]
+	if !ok {
+		addrs = make(map[addr]struct{})
+		p2p.knownAddrs[peer.IDIP()] = addrs
+	}
+	addrs[peer.Addr()] = struct{}{}
+	p2p.knownIDIPs[peer.Addr()] = peer.IDIP()
+	if _, ok := p2p.activePeers[peer.IDIP()]; ok {
+		return ErrAlreadyConnected
+	}
+	p2p.activePeers[peer.IDIP()] = peer
 	bf := p2p.Storage.Torrent.Bitfield
 	if err := peer.Send(peerapi.Bitfield(bf)); err != nil {
 		return err
 	}
-	p2p.mu.Lock()
-	p2p.activePeers[peer.IPID()] = peer
-	p2p.mu.Unlock()
 	return nil
 }
 
 func (p2p *Server) Disconnect(peer *Peer) error {
 	p2p.mu.Lock()
 	defer p2p.mu.Unlock()
-	slog.Debug("Disconnect", "peer", peer.RemoteAddr().String())
+	slog.Debug("Disconnect", "peer", peer.Addr())
 	return p2p.disconnect(peer)
 }
 
 func (p2p *Server) Block(peer *Peer) error {
 	p2p.mu.Lock()
 	defer p2p.mu.Unlock()
-	slog.Debug("Block", "peer", peer.RemoteAddr().String())
-	p2p.blockedPeers[peer.RemoteAddr().String()] = struct{}{}
+	slog.Debug("Block", "peer", peer.Addr())
+	for addr := range p2p.knownAddrs[peer.IDIP()] {
+		p2p.blockedPeers[addr] = struct{}{}
+	}
 	return p2p.disconnect(peer)
 }
 
@@ -307,7 +353,7 @@ func (p2p *Server) dialTCP(peer *tracker.Peer) (*Peer, error) {
 }
 
 func (p2p *Server) dialPeer(ctx context.Context, tp *tracker.Peer) error {
-	addr, err := addr(tp)
+	addr, err := remoteAddr(tp)
 	if err != nil {
 		return err
 	}
@@ -323,10 +369,7 @@ func (p2p *Server) dialPeer(ctx context.Context, tp *tracker.Peer) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	peer.cancel = cancel
-	if err := p2p.Connect(peer); err != nil {
-		return errors.Join(err, peer.Close())
-	}
-	go peer.serve(ctx)
+	peer.serve(ctx)
 	return nil
 }
 
@@ -412,15 +455,22 @@ func (p2p *Server) queuePeer(peer *Peer) bool {
 }
 
 func (p2p *Server) disconnect(peer *Peer) error {
-	delete(p2p.activePeers, peer.IPID())
 	for _, i := range peer.Bitfield.Items() {
 		delete(p2p.indexToPeers[i], peer)
 	}
+	for addr := range p2p.knownAddrs[peer.IDIP()] {
+		if idip, ok := p2p.knownIDIPs[addr]; ok && idip == peer.IDIP() {
+			delete(p2p.knownIDIPs, addr)
+		}
+	}
+	delete(p2p.knownAddrs, peer.IDIP())
+	delete(p2p.activePeers, peer.IDIP())
 	return peer.Close()
 }
 
 func (p2p *Server) newPeer(conn net.Conn) *Peer {
 	peer := &Peer{
+		Bitfield:         bitfield.New(len(p2p.Info.Pieces)),
 		server:           p2p,
 		Conn:             conn,
 		inflightRequests: make(map[blockRequest]*future.Future[error]),
@@ -446,10 +496,10 @@ func (p2p *Server) every(ctx context.Context, f func(ctx context.Context) error,
 	}
 }
 
-func addr(tp *tracker.Peer) (string, error) {
+func remoteAddr(tp *tracker.Peer) (addr, error) {
 	ip := net.ParseIP(tp.IP)
 	if ip == nil {
 		return "", errors.New("p2p: bad ip")
 	}
-	return fmt.Sprintf("%s:%d", ip.String(), tp.Port), nil
+	return addr(fmt.Sprintf("%s:%d", ip.String(), tp.Port)), nil
 }

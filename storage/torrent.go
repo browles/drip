@@ -23,9 +23,10 @@ type Torrent struct {
 
 func newTorrent(info *metainfo.Info) *Torrent {
 	torrent := &Torrent{
-		Info:   info,
-		pieces: make([]*Piece, len(info.Pieces)),
-		err:    future.New[error](),
+		Info:     info,
+		Bitfield: bitfield.New(len(info.Pieces)),
+		pieces:   make([]*Piece, len(info.Pieces)),
+		err:      future.New[error](),
 	}
 	for i := range len(info.Pieces) {
 		torrent.pieces[i] = newPiece(info, i)
@@ -39,10 +40,6 @@ func (t *Torrent) WorkDir() string {
 
 func (t *Torrent) FileName() string {
 	return t.Info.Name
-}
-
-func (t *Torrent) GetPiece(index int) *Piece {
-	return t.pieces[index]
 }
 
 func (t *Torrent) Wait() error {

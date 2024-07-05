@@ -104,6 +104,7 @@ func (t *Tracker) Announce() (*trackerapi.Response, error) {
 
 func (mt *Tracker) get(event eventName) (*trackerapi.Response, error) {
 	req := &trackerapi.Request{
+		InfoHash:   mt.server.Info.SHA1,
 		PeerID:     mt.server.PeerID,
 		Port:       mt.server.Port,
 		Uploaded:   mt.server.Uploaded(),

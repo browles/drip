@@ -57,7 +57,7 @@ func (p *Peer) Close() error {
 }
 
 func (p *Peer) Handshake() error {
-	slog.Debug("Handshake", "peer", p.RemoteAddr())
+	slog.Debug("Handshake", "peer", p.IDIP())
 	p.SetDeadline(time.Now().Add(10 * time.Second))
 	defer p.SetDeadline(time.Time{})
 	hs := &peerapi.Handshake{
@@ -84,9 +84,13 @@ func (p *Peer) Handshake() error {
 	return nil
 }
 
-func (p *Peer) IPID() IPID {
+func (p *Peer) IDIP() idip {
 	addr := p.RemoteAddr().(*net.TCPAddr)
-	return IPID(fmt.Sprintf("%s[%s]", string(p.ID[:]), addr.IP.String()))
+	return idip(fmt.Sprintf("%s[%s]", string(p.ID[:]), addr.IP.String()))
+}
+
+func (p *Peer) Addr() addr {
+	return addr(p.RemoteAddr().String())
 }
 
 func (p *Peer) Send(m *peerapi.Message) error {
@@ -98,7 +102,7 @@ func (p *Peer) Send(m *peerapi.Message) error {
 		}
 		p.SetReadDeadline(time.Now().Add(2 * time.Minute))
 	}
-	slog.Debug("Send", "peer", p.ID, "message", m)
+	slog.Debug("Send", "peer", p.IDIP(), "message", m)
 	return peerapi.Write(p.Conn, m)
 }
 
@@ -108,7 +112,7 @@ func (p *Peer) Receive() (m *peerapi.Message, err error) {
 	if err != nil {
 		return nil, err
 	}
-	slog.Debug("Receive", "peer", p.ID, "message", m)
+	slog.Debug("Receive", "peer", p.IDIP(), "message", m)
 	switch m.Type {
 	case peerapi.PIECE:
 		p.mu.Lock()
@@ -159,6 +163,17 @@ func (p *Peer) NotInterest() error {
 }
 
 func (peer *Peer) serve(ctx context.Context) {
+	if err := peer.server.Connect(peer); err != nil {
+		if !errors.Is(err, ErrAlreadyConnected) {
+			slog.Error("serve.Connect", "err", err)
+		}
+		return
+	}
+	defer func() {
+		if err := peer.server.Disconnect(peer); err != nil {
+			slog.Error("serve.Disconnect", "err", err)
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -168,12 +183,10 @@ func (peer *Peer) serve(ctx context.Context) {
 		m, err := peer.Receive()
 		if err != nil {
 			slog.Error("serve.Receive", "err", err)
-			peer.server.Disconnect(peer)
 			return
 		}
 		if err = peer.HandleMessage(m); err != nil {
 			slog.Error("serve.HandleMessage", "err", err)
-			peer.server.Disconnect(peer)
 			return
 		}
 	}
@@ -194,8 +207,7 @@ func (peer *Peer) HandleMessage(m *peerapi.Message) error {
 	case peerapi.HAVE:
 		return peer.HandleHave(m.Index())
 	case peerapi.BITFIELD:
-		bf := m.Bitfield()
-		for _, i := range bf.Items() {
+		for _, i := range m.Bitfield().Items() {
 			if err := peer.HandleHave(i); err != nil {
 				return err
 			}
@@ -265,7 +277,7 @@ func (peer *Peer) HandlePiece(index, begin int, data []byte) error {
 }
 
 func (peer *Peer) requestPiece(ctx context.Context, index int) (err error) {
-	slog.Debug("requestPiece", "peer", peer.ID, "index", index)
+	slog.Debug("requestPiece", "peer", peer.IDIP(), "index", index)
 	pieceLength := peer.server.Info.GetPieceLength(index)
 	piece := peer.server.Storage.ResetPiece(index)
 	eg, ctx := errgroup.WithContext(ctx)
